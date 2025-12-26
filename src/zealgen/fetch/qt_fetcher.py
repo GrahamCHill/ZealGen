@@ -27,18 +27,40 @@ class QtFetchWorker(QObject):
         
         # Internal state to track the current fetch
         self._current_url = url
+        self._last_html_len = 0
+        self._stable_count = 0
+        self._total_wait_time = 0
         
         def on_load_finished(ok):
             # Disconnect to avoid multiple calls if multiple loads happen
             self._page.loadFinished.disconnect(on_load_finished)
             if ok:
-                # Give JS some time to render
-                QTimer.singleShot(2000, lambda: self._page.toHtml(self._on_html))
+                # Start polling for content stability
+                self._poll_content()
             else:
                 self.fetch_finished.emit("", self._current_url)
         
         self._page.loadFinished.connect(on_load_finished)
         self._page.load(QUrl(url))
+
+    def _poll_content(self):
+        self._page.toHtml(self._check_stability)
+
+    def _check_stability(self, html):
+        current_len = len(html)
+        if current_len > 0 and current_len == self._last_html_len:
+            self._stable_count += 1
+        else:
+            self._stable_count = 0
+            self._last_html_len = current_len
+
+        self._total_wait_time += 500
+        
+        # If stable for 3 checks (1.5s) or reached max timeout (10s)
+        if (self._stable_count >= 3 and self._total_wait_time >= 2000) or self._total_wait_time >= 10000:
+            self.fetch_finished.emit(html, self._current_url)
+        else:
+            QTimer.singleShot(500, self._poll_content)
 
     def _on_html(self, html):
         self.fetch_finished.emit(html, self._current_url)

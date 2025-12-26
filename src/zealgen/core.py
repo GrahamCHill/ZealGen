@@ -46,9 +46,21 @@ async def scan(urls, js=False, max_pages=10, progress_callback=None, fetcher_typ
             progress_callback(pages_count, max_pages)
         
         try:
-            result = await fetcher.fetch(url)
+            # Add retries for robustness
+            max_retries = 3
+            result = None
+            for attempt in range(max_retries):
+                try:
+                    result = await fetcher.fetch(url)
+                    break
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        print(f"Final attempt failed for {url}: {e}")
+                        raise e
+                    print(f"Retry {attempt + 1}/{max_retries} for {url} due to: {e}")
+                    await anyio.sleep(2 * (attempt + 1)) # Simple backoff
         except Exception as e:
-            print(f"Failed to fetch {url}: {e}")
+            print(f"Failed to fetch {url} after {max_retries} attempts: {e}")
             continue
 
         pages_count += 1
@@ -101,9 +113,21 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
             progress_callback(pages_count, max_pages)
         
         try:
-            result = await fetcher.fetch(url)
+            # Add retries for robustness
+            max_retries = 3
+            result = None
+            for attempt in range(max_retries):
+                try:
+                    result = await fetcher.fetch(url)
+                    break
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        print(f"Final attempt failed for {url}: {e}")
+                        raise e
+                    print(f"Retry {attempt + 1}/{max_retries} for {url} due to: {e}")
+                    await anyio.sleep(2 * (attempt + 1)) # Simple backoff
         except Exception as e:
-            print(f"Failed to fetch {url}: {e}")
+            print(f"Failed to fetch {url} after {max_retries} attempts: {e}")
             continue
 
         if not builder.has_icon:
