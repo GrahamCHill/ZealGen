@@ -33,10 +33,14 @@ ZealGen is a powerful, Python-based tool designed to generate [Zeal](https://zea
    cd docsetGenerator
    ```
 
-2. Install dependencies:
+2. Install dependencies and activate environment:
    ```bash
+   uv venv
+   source .venv/bin/activate
    uv sync
    # OR
+   python3 -m venv .venv
+   source .venv/bin/activate
    pip install .
    ```
 
