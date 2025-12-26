@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QFileDialog, QCheckBox,
     QLabel, QTextEdit, QMessageBox, QProgressBar, QDialog,
-    QListWidgetItem, QInputDialog, QComboBox, QTreeWidget, QTreeWidgetItem
+    QListWidgetItem, QInputDialog, QComboBox, QTreeWidget, QTreeWidgetItem,
+    QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PySide6.QtCore import Qt, QThread, Signal, QStandardPaths
 from .core import generate, scan
@@ -35,26 +36,48 @@ class ScanWorker(QThread):
         except Exception as e:
             self.error.emit(str(e))
 
-class Worker(QThread):
+class MultiWorker(QThread):
     finished = Signal()
     error = Signal(str)
     log = Signal(str)
     progress = Signal(int, int)
 
-    def __init__(self, urls, output, js, allowed_urls=None, fetcher_type="playwright"):
+    def __init__(self, url_names, output_base, js, allowed_urls=None, fetcher_type="playwright"):
         super().__init__()
-        self.urls = urls
-        self.output = output
+        self.url_names = url_names
+        self.output_base = output_base
         self.js = js
         self.allowed_urls = allowed_urls
         self.fetcher_type = fetcher_type
 
     def run(self):
         try:
-            def report_progress(current, total):
-                self.progress.emit(current, total)
+            # Group URLs by docset name
+            groups = {}
+            for url, name in self.url_names:
+                if name not in groups:
+                    groups[name] = []
+                groups[name].append(url)
 
-            anyio.run(generate, self.urls, self.output, self.js, 100, report_progress, self.allowed_urls, self.fetcher_type)
+            total_docsets = len(groups)
+            for i, (name, urls) in enumerate(groups.items()):
+                self.log.emit(f"Generating docset: {name} ({i+1}/{total_docsets})")
+                
+                docset_filename = name if name.endswith(".docset") else f"{name}.docset"
+                output_path = os.path.join(self.output_base, docset_filename)
+                
+                # Filter allowed_urls for this docset based on domain if possible
+                # or just pass them all and let core.py's heuristic/explicit check handle it.
+                # Since core.py uses normalize_url for comparison, passing all is safe
+                # but might be slightly inefficient if the list is huge.
+                
+                def report_progress(current, total):
+                    # For now, just report the progress of the current docset
+                    # We could try to aggregate, but that's complex without knowing total pages beforehand
+                    self.progress.emit(current, total)
+
+                anyio.run(generate, urls, output_path, self.js, 100, report_progress, self.allowed_urls, self.fetcher_type)
+            
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
@@ -211,10 +234,13 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # URL list
-        layout.addWidget(QLabel("URLs to fetch:"))
-        self.url_list = QListWidget()
-        layout.addWidget(self.url_list)
+        # URL Table
+        layout.addWidget(QLabel("URLs and Docset Names:"))
+        self.url_table = QTableWidget(0, 2)
+        self.url_table.setHorizontalHeaderLabels(["URL", "Docset Name"])
+        self.url_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.url_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        layout.addWidget(self.url_table)
 
         url_input_layout = QHBoxLayout()
         self.url_input = QLineEdit()
@@ -232,7 +258,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(url_input_layout)
 
         # Output directory
-        layout.addWidget(QLabel("Output Docset Path:"))
+        layout.addWidget(QLabel("Output Base Directory:"))
         out_layout = QHBoxLayout()
         self.out_input = QLineEdit()
         out_layout.addWidget(self.out_input)
@@ -297,48 +323,44 @@ class MainWindow(QMainWindow):
     def add_url(self):
         url = self.url_input.text().strip()
         if url:
-            self.url_list.addItem(url)
-            self.url_input.clear()
-
-    def remove_url(self):
-        for item in self.url_list.selectedItems():
-            self.url_list.takeItem(self.url_list.row(item))
-
-    def browse_output(self):
-        parent_dir = QFileDialog.getExistingDirectory(self, "Select Output Directory")
-        if parent_dir:
-            # If they have URLs, suggest a name based on the first URL
-            urls = [self.url_list.item(i).text() for i in range(self.url_list.count())]
-            suggested_name = "Custom"
-            if urls:
-                suggested_name = clean_domain(urlparse(urls[0]).netloc)
-            
-            # Prompt the user for the docset name
+            suggested_name = clean_domain(urlparse(url).netloc)
             name, ok = QInputDialog.getText(
-                self, "Docset Name", "Enter the name for your docset:",
+                self, "Docset Name", f"Enter name for {url}:",
                 text=suggested_name
             )
-            
             if ok and name:
-                if not name.endswith(".docset"):
-                    name += ".docset"
-                path = os.path.join(parent_dir, name)
-                self.out_input.setText(path)
+                row = self.url_table.rowCount()
+                self.url_table.insertRow(row)
+                self.url_table.setItem(row, 0, QTableWidgetItem(url))
+                self.url_table.setItem(row, 1, QTableWidgetItem(name))
+                self.url_input.clear()
+
+    def remove_url(self):
+        selected = self.url_table.selectionModel().selectedRows()
+        for index in sorted(selected, reverse=True):
+            self.url_table.removeRow(index.row())
+
+    def browse_output(self):
+        parent_dir = QFileDialog.getExistingDirectory(self, "Select Output Base Directory")
+        if parent_dir:
+            self.out_input.setText(parent_dir)
 
     def start_generation(self):
-        urls = [self.url_list.item(i).text() for i in range(self.url_list.count())]
-        output = self.out_input.text().strip()
-        if output and not output.endswith(".docset"):
-            output += ".docset"
-            self.out_input.setText(output)
+        url_names = []
+        for i in range(self.url_table.rowCount()):
+            url = self.url_table.item(i, 0).text()
+            name = self.url_table.item(i, 1).text()
+            url_names.append((url, name))
+            
+        output_base = self.out_input.text().strip()
         js = self.js_checkbox.isChecked()
         engine = self.js_engine_combo.currentText()
 
-        if not urls:
+        if not url_names:
             QMessageBox.warning(self, "Error", "Please add at least one URL.")
             return
-        if not output:
-            QMessageBox.warning(self, "Error", "Please specify an output path.")
+        if not output_base:
+            QMessageBox.warning(self, "Error", "Please specify an output base directory.")
             return
 
         self.generate_btn.setEnabled(False)
@@ -346,6 +368,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         
+        urls = [un[0] for un in url_names]
         self.scan_worker = ScanWorker(urls, js, engine)
         self.scan_worker.finished.connect(self.on_scan_finished)
         self.scan_worker.error.connect(self.on_error)
@@ -354,7 +377,13 @@ class MainWindow(QMainWindow):
 
     def on_scan_finished(self, discovered_urls):
         self.progress_bar.setVisible(False)
-        urls = [self.url_list.item(i).text() for i in range(self.url_list.count())]
+        url_names = []
+        for i in range(self.url_table.rowCount()):
+            url = self.url_table.item(i, 0).text()
+            name = self.url_table.item(i, 1).text()
+            url_names.append((url, name))
+        
+        urls = [un[0] for un in url_names]
         dialog = URLSelectionDialog(discovered_urls, urls, self)
         if dialog.exec() == QDialog.Accepted:
             selected_urls = dialog.get_selected_urls()
@@ -369,21 +398,25 @@ class MainWindow(QMainWindow):
             self.generate_btn.setEnabled(True)
 
     def run_generation(self, selected_urls):
-        urls = [self.url_list.item(i).text() for i in range(self.url_list.count())]
-        output = self.out_input.text().strip()
-        if not output.endswith(".docset"):
-            output += ".docset"
+        url_names = []
+        for i in range(self.url_table.rowCount()):
+            url = self.url_table.item(i, 0).text()
+            name = self.url_table.item(i, 1).text()
+            url_names.append((url, name))
+            
+        output_base = self.out_input.text().strip()
         js = self.js_checkbox.isChecked()
         engine = self.js_engine_combo.currentText()
 
-        self.log_output.append(f"Starting generation with {len(selected_urls)} pages (Engine: {engine})...")
+        self.log_output.append(f"Starting generation for {len(url_names)} docsets (Total {len(selected_urls)} pages)...")
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         
-        self.worker = Worker(urls, output, js, allowed_urls=selected_urls, fetcher_type=engine)
+        self.worker = MultiWorker(url_names, output_base, js, allowed_urls=selected_urls, fetcher_type=engine)
         self.worker.finished.connect(self.on_finished)
         self.worker.error.connect(self.on_error)
         self.worker.progress.connect(self.update_progress)
+        self.worker.log.connect(lambda m: self.log_output.append(m))
         self.worker.start()
 
     def update_progress(self, current, total):
