@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QFileDialog, QCheckBox,
     QLabel, QTextEdit, QMessageBox, QProgressBar, QDialog,
-    QListWidgetItem, QInputDialog
+    QListWidgetItem, QInputDialog, QComboBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QStandardPaths
 from .core import generate, scan
@@ -19,17 +19,18 @@ class ScanWorker(QThread):
     error = Signal(str)
     progress = Signal(int, int)
 
-    def __init__(self, urls, js):
+    def __init__(self, urls, js, fetcher_type="playwright"):
         super().__init__()
         self.urls = urls
         self.js = js
+        self.fetcher_type = fetcher_type
 
     def run(self):
         try:
             def report_progress(current, total):
                 self.progress.emit(current, total)
 
-            discovered = anyio.run(scan, self.urls, self.js, 20, report_progress)
+            discovered = anyio.run(scan, self.urls, self.js, 20, report_progress, self.fetcher_type)
             self.finished.emit(discovered)
         except Exception as e:
             self.error.emit(str(e))
@@ -40,19 +41,20 @@ class Worker(QThread):
     log = Signal(str)
     progress = Signal(int, int)
 
-    def __init__(self, urls, output, js, allowed_urls=None):
+    def __init__(self, urls, output, js, allowed_urls=None, fetcher_type="playwright"):
         super().__init__()
         self.urls = urls
         self.output = output
         self.js = js
         self.allowed_urls = allowed_urls
+        self.fetcher_type = fetcher_type
 
     def run(self):
         try:
             def report_progress(current, total):
                 self.progress.emit(current, total)
 
-            anyio.run(generate, self.urls, self.output, self.js, 100, report_progress, self.allowed_urls)
+            anyio.run(generate, self.urls, self.output, self.js, 100, report_progress, self.allowed_urls, self.fetcher_type)
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
@@ -199,8 +201,15 @@ class MainWindow(QMainWindow):
         layout.addLayout(out_layout)
 
         # Options
-        self.js_checkbox = QCheckBox("Enable JavaScript (Playwright)")
-        layout.addWidget(self.js_checkbox)
+        options_layout = QHBoxLayout()
+        self.js_checkbox = QCheckBox("Enable JavaScript")
+        options_layout.addWidget(self.js_checkbox)
+        
+        options_layout.addWidget(QLabel("JS Engine:"))
+        self.js_engine_combo = QComboBox()
+        self.js_engine_combo.addItems(["playwright", "qt"])
+        options_layout.addWidget(self.js_engine_combo)
+        layout.addLayout(options_layout)
 
         # Progress
         self.progress_bar = QProgressBar()
@@ -282,6 +291,7 @@ class MainWindow(QMainWindow):
             output += ".docset"
             self.out_input.setText(output)
         js = self.js_checkbox.isChecked()
+        engine = self.js_engine_combo.currentText()
 
         if not urls:
             QMessageBox.warning(self, "Error", "Please add at least one URL.")
@@ -291,11 +301,11 @@ class MainWindow(QMainWindow):
             return
 
         self.generate_btn.setEnabled(False)
-        self.log_output.append("Starting initial scan...")
+        self.log_output.append(f"Starting initial scan (Engine: {engine})...")
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         
-        self.scan_worker = ScanWorker(urls, js)
+        self.scan_worker = ScanWorker(urls, js, engine)
         self.scan_worker.finished.connect(self.on_scan_finished)
         self.scan_worker.error.connect(self.on_error)
         self.scan_worker.progress.connect(self.update_progress)
@@ -323,12 +333,13 @@ class MainWindow(QMainWindow):
         if not output.endswith(".docset"):
             output += ".docset"
         js = self.js_checkbox.isChecked()
+        engine = self.js_engine_combo.currentText()
 
-        self.log_output.append(f"Starting generation with {len(selected_urls)} pages...")
+        self.log_output.append(f"Starting generation with {len(selected_urls)} pages (Engine: {engine})...")
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         
-        self.worker = Worker(urls, output, js, allowed_urls=selected_urls)
+        self.worker = Worker(urls, output, js, allowed_urls=selected_urls, fetcher_type=engine)
         self.worker.finished.connect(self.on_finished)
         self.worker.error.connect(self.on_error)
         self.worker.progress.connect(self.update_progress)
@@ -340,12 +351,10 @@ class MainWindow(QMainWindow):
 
     def on_finished(self):
         self.progress_bar.setValue(self.progress_bar.maximum())
-        self.log_output.append("Generation completed successfully!")
         self.generate_btn.setEnabled(True)
         QMessageBox.information(self, "Done", "Docset generated successfully.")
 
     def on_error(self, message):
-        self.log_output.append(f"Error: {message}")
         self.generate_btn.setEnabled(True)
         QMessageBox.critical(self, "Error", f"An error occurred: {message}")
 

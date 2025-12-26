@@ -4,6 +4,10 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from .fetch.httpx_fetcher import HttpxFetcher
 from .fetch.playwright_fetcher import PlaywrightFetcher
+try:
+    from .fetch.qt_fetcher import QtFetcher
+except ImportError:
+    QtFetcher = None
 from .parsers import sphinx, docusaurus, rustdoc, generic
 from .docset.builder import DocsetBuilder
 from .assets.rewrite import rewrite_assets, get_favicon_url
@@ -17,8 +21,14 @@ PARSERS = [
     generic.GenericParser(),
 ]
 
-async def scan(urls, js=False, max_pages=10, progress_callback=None):
-    fetcher = PlaywrightFetcher() if js else HttpxFetcher()
+async def scan(urls, js=False, max_pages=10, progress_callback=None, fetcher_type="playwright"):
+    if js:
+        if fetcher_type == "qt" and QtFetcher:
+            fetcher = QtFetcher()
+        else:
+            fetcher = PlaywrightFetcher()
+    else:
+        fetcher = HttpxFetcher()
     
     visited = set()
     queue = list(urls)
@@ -57,8 +67,14 @@ async def scan(urls, js=False, max_pages=10, progress_callback=None):
 
     return sorted(list(discovered))
 
-async def generate(urls, output, js=False, max_pages=100, progress_callback=None, allowed_urls=None):
-    fetcher = PlaywrightFetcher() if js else HttpxFetcher()
+async def generate(urls, output, js=False, max_pages=100, progress_callback=None, allowed_urls=None, fetcher_type="playwright"):
+    if js:
+        if fetcher_type == "qt" and QtFetcher:
+            fetcher = QtFetcher()
+        else:
+            fetcher = PlaywrightFetcher()
+    else:
+        fetcher = HttpxFetcher()
     builder = DocsetBuilder(output)
     doc_dir = pathlib.Path(builder.documents_path)
     
