@@ -6,3 +6,5 @@
 /src/zealgen/parsers/__pycache__
 /src/zealgen/utils/__pycache__
 /test/
+*.pyc
+.DS_Store

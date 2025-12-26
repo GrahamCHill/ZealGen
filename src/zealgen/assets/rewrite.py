@@ -19,11 +19,17 @@ async def rewrite_assets(html, base_url, out_dir):
                     continue
 
                 try:
-                    data = (await client.get(url)).content
-                    fname = pathlib.Path(url).name
-                    # Avoid empty filenames or weird ones
-                    if not fname:
-                         fname = "asset_" + hashlib.md5(url.encode()).hexdigest()[:8]
+                    r = await client.get(url)
+                    r.raise_for_status()
+                    data = r.content
+                    
+                    # Use a hash of the full URL to ensure uniqueness and avoid collision
+                    # while keeping a hint of the original extension
+                    ext = pathlib.Path(url).suffix
+                    if not ext or len(ext) > 5:
+                        ext = ".js" if tag == "script" else ".css"
+                    
+                    fname = hashlib.md5(url.encode()).hexdigest() + ext
                     
                     path = out_dir / fname
                     path.write_bytes(data)
