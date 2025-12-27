@@ -1,30 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import sys
 from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
 # -------------------------------------------------
-# Collect Qt (PySide6)
-# -------------------------------------------------
-qt_datas, qt_binaries, qt_hidden = collect_all("PySide6")
-
-# -------------------------------------------------
-# Collect Playwright (python side)
-# Browsers are NOT bundled (see note below)
+# Playwright (python side only)
 # -------------------------------------------------
 pw_datas, pw_binaries, pw_hidden = collect_all("playwright")
 
 hiddenimports = (
-    qt_hidden
-    + pw_hidden
+    pw_hidden
     + [
-        # dynamic imports in your codebase
         "playwright.sync_api",
         "playwright.async_api",
 
-        # your internal modules (defensive)
+        # internal dynamic imports
         "app",
         "cli",
         "core",
@@ -43,10 +34,8 @@ hiddenimports = (
 )
 
 datas = (
-    qt_datas
-    + pw_datas
+    pw_datas
     + [
-        # bundle non-python assets
         ("assets", "assets"),
     ]
 )
@@ -54,14 +43,12 @@ datas = (
 a = Analysis(
     ["main.py"],
     pathex=["."],
-    binaries=qt_binaries + pw_binaries,
+    binaries=pw_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
@@ -78,7 +65,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,   # <-- app bundle, no terminal
+    console=False,  # macOS app bundle
 )
 
 coll = COLLECT(
@@ -87,12 +74,12 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="ZealGen",
+    name="zealgen",
 )
 
 app = BUNDLE(
     coll,
-    name="zealgen.app",
-    icon=None,  # set .icns later if you want
-    bundle_identifier="com.yourname.zealgen",
+    name="ZealGen.app",
+    icon = None, # set .icns later if you want
+    bundle_identifier="dev.grahamhill.zealgen",
 )

@@ -42,41 +42,26 @@ class MultiWorker(QThread):
     log = Signal(str)
     progress = Signal(int, int)
 
-    def __init__(self, url_names, output_base, js, allowed_urls=None, fetcher_type="playwright"):
+    def __init__(self, docsets_to_generate, output_base, js, fetcher_type="playwright"):
         super().__init__()
-        self.url_names = url_names
+        self.docsets_to_generate = docsets_to_generate
         self.output_base = output_base
         self.js = js
-        self.allowed_urls = allowed_urls
         self.fetcher_type = fetcher_type
 
     def run(self):
         try:
-            # Group URLs by docset name
-            groups = {}
-            for url, name in self.url_names:
-                if name not in groups:
-                    groups[name] = []
-                groups[name].append(url)
-
-            total_docsets = len(groups)
-            for i, (name, urls) in enumerate(groups.items()):
+            total_docsets = len(self.docsets_to_generate)
+            for i, (name, urls, allowed_urls) in enumerate(self.docsets_to_generate):
                 self.log.emit(f"Generating docset: {name} ({i+1}/{total_docsets})")
                 
                 docset_filename = name if name.endswith(".docset") else f"{name}.docset"
                 output_path = os.path.join(self.output_base, docset_filename)
                 
-                # Filter allowed_urls for this docset based on domain if possible
-                # or just pass them all and let core.py's heuristic/explicit check handle it.
-                # Since core.py uses normalize_url for comparison, passing all is safe
-                # but might be slightly inefficient if the list is huge.
-                
                 def report_progress(current, total):
-                    # For now, just report the progress of the current docset
-                    # We could try to aggregate, but that's complex without knowing total pages beforehand
                     self.progress.emit(current, total)
 
-                anyio.run(generate, urls, output_path, self.js, 100, report_progress, self.allowed_urls, self.fetcher_type)
+                anyio.run(generate, urls, output_path, self.js, 100, report_progress, allowed_urls, self.fetcher_type)
             
             self.finished.emit()
         except Exception as e:
@@ -346,30 +331,38 @@ class MainWindow(QMainWindow):
             self.out_input.setText(parent_dir)
 
     def start_generation(self):
-        url_names = []
+        self.docsets_queue = []
         for i in range(self.url_table.rowCount()):
             url = self.url_table.item(i, 0).text()
             name = self.url_table.item(i, 1).text()
-            url_names.append((url, name))
+            self.docsets_queue.append({"url": url, "name": name})
             
-        output_base = self.out_input.text().strip()
-        js = self.js_checkbox.isChecked()
-        engine = self.js_engine_combo.currentText()
+        self.output_base = self.out_input.text().strip()
+        self.js = self.js_checkbox.isChecked()
+        self.engine = self.js_engine_combo.currentText()
+        self.docsets_to_generate = []
 
-        if not url_names:
+        if not self.docsets_queue:
             QMessageBox.warning(self, "Error", "Please add at least one URL.")
             return
-        if not output_base:
+        if not self.output_base:
             QMessageBox.warning(self, "Error", "Please specify an output base directory.")
             return
 
         self.generate_btn.setEnabled(False)
-        self.log_output.append(f"Starting initial scan (Engine: {engine})...")
+        self.process_next_docset()
+
+    def process_next_docset(self):
+        if not self.docsets_queue:
+            self.run_generation()
+            return
+
+        self.current_docset = self.docsets_queue.pop(0)
+        self.log_output.append(f"Scanning for {self.current_docset['name']} ({self.current_docset['url']})...")
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         
-        urls = [un[0] for un in url_names]
-        self.scan_worker = ScanWorker(urls, js, engine)
+        self.scan_worker = ScanWorker([self.current_docset['url']], self.js, self.engine)
         self.scan_worker.finished.connect(self.on_scan_finished)
         self.scan_worker.error.connect(self.on_error)
         self.scan_worker.progress.connect(self.update_progress)
@@ -377,42 +370,35 @@ class MainWindow(QMainWindow):
 
     def on_scan_finished(self, discovered_urls):
         self.progress_bar.setVisible(False)
-        url_names = []
-        for i in range(self.url_table.rowCount()):
-            url = self.url_table.item(i, 0).text()
-            name = self.url_table.item(i, 1).text()
-            url_names.append((url, name))
         
-        urls = [un[0] for un in url_names]
-        dialog = URLSelectionDialog(discovered_urls, urls, self)
+        dialog = URLSelectionDialog(discovered_urls, [self.current_docset['url']], self)
+        dialog.setWindowTitle(f"Select URLs for {self.current_docset['name']}")
         if dialog.exec() == QDialog.Accepted:
             selected_urls = dialog.get_selected_urls()
             if not selected_urls:
-                QMessageBox.warning(self, "Error", "No URLs selected. Generation cancelled.")
-                self.generate_btn.setEnabled(True)
-                return
-            
-            self.run_generation(selected_urls)
+                self.log_output.append(f"No URLs selected for {self.current_docset['name']}. Skipping.")
+            else:
+                self.docsets_to_generate.append((
+                    self.current_docset['name'],
+                    [self.current_docset['url']],
+                    selected_urls
+                ))
+            self.process_next_docset()
         else:
             self.log_output.append("Generation cancelled by user.")
             self.generate_btn.setEnabled(True)
 
-    def run_generation(self, selected_urls):
-        url_names = []
-        for i in range(self.url_table.rowCount()):
-            url = self.url_table.item(i, 0).text()
-            name = self.url_table.item(i, 1).text()
-            url_names.append((url, name))
-            
-        output_base = self.out_input.text().strip()
-        js = self.js_checkbox.isChecked()
-        engine = self.js_engine_combo.currentText()
+    def run_generation(self):
+        if not self.docsets_to_generate:
+            self.log_output.append("No docsets to generate.")
+            self.generate_btn.setEnabled(True)
+            return
 
-        self.log_output.append(f"Starting generation for {len(url_names)} docsets (Total {len(selected_urls)} pages)...")
+        self.log_output.append(f"Starting generation for {len(self.docsets_to_generate)} docsets...")
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
-        
-        self.worker = MultiWorker(url_names, output_base, js, allowed_urls=selected_urls, fetcher_type=engine)
+
+        self.worker = MultiWorker(self.docsets_to_generate, self.output_base, self.js, self.engine)
         self.worker.finished.connect(self.on_finished)
         self.worker.error.connect(self.on_error)
         self.worker.progress.connect(self.update_progress)
