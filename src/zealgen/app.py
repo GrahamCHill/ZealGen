@@ -227,7 +227,7 @@ class URLSelectionDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Zeal Docset Generator")
+        self.setWindowTitle("ZealGen")
         self.setMinimumSize(600, 400)
 
         central_widget = QWidget()

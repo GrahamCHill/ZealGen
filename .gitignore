@@ -8,3 +8,5 @@
 /test/
 *.pyc
 .DS_Store
+/src/zealgen/build
+/src/zealgen/dist
