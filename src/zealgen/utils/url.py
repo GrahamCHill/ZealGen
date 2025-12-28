@@ -45,22 +45,8 @@ def get_filename_from_url(url: str) -> str:
     domain = clean_domain(parsed.netloc)
     
     path = parsed.path
-    # Consistently handle trailing slashes by removing them, 
-    # then adding index.html if it's a directory or empty.
-    # But we want to be careful not to remove it from something that IS a directory.
-    # Actually, the most robust way is to match normalize_url's behavior.
-    if path.endswith("/"):
-        path = path.rstrip("/")
-        if not path:
-             path = "index.html"
-        else:
-             path += "/index.html"
-    elif not path:
-        path = "index.html"
-    elif "." not in path.split("/")[-1]:
-        # If the last component has no dot, it's likely a directory-style URL
-        # e.g. /tutorials/OpenGL
-        path += "/index.html"
+    if not path or path.endswith("/"):
+        path += "index.html"
     
     # Remove leading slash
     if path.startswith("/"):

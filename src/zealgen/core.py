@@ -83,7 +83,7 @@ async def scan(urls, js=False, max_pages=10, progress_callback=None, fetcher_typ
             
             norm_url = normalize_url(clean_url)
             
-            if norm_url not in visited and all(normalize_url(q) != norm_url for q in queue):
+            if norm_url not in visited and norm_url not in queue:
                 # More robust within-doc check for scanning too
                 is_within_doc = False
                 for start_url in urls:
@@ -206,7 +206,7 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
                 # Use normalized URL for checking visited/queue to be consistent
                 norm_clean_url = normalize_url(clean_url)
                 # But we still need the actual URL to fetch it
-                if norm_clean_url not in visited and all(normalize_url(q) != norm_clean_url for q in queue):
+                if norm_clean_url not in visited and norm_clean_url not in queue:
                      if not allowed_urls or norm_clean_url in allowed_urls:
                         queue.append(clean_url)
             else:
@@ -214,7 +214,7 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
                 # so it doesn't break in the flat docset structure.
                 a["href"] = next_url
         
-        updated_html = await rewrite_assets(str(soup), result.url, doc_dir)
+        updated_html = await rewrite_assets(str(soup), url, doc_dir)
         pages_count += 1
         
         # Ensure DOCTYPE exists
