@@ -165,6 +165,11 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
         base_parsed = urlparse(current_url)
         for a in soup.find_all("a", href=True):
             raw_href = a["href"]
+            
+            # If it's a simple fragment link, keep it as is
+            if raw_href.startswith("#"):
+                continue
+
             next_url = urljoin(current_url, raw_href)
             
             # Use normalized URL for discovery decision
@@ -188,6 +193,12 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
             # More robust within-doc check
             # We want to stay on the same domain and at or below the base path of the starting URLs
             is_within_doc = False
+            next_url_is_same_page = False
+            
+            # Check if next_url is the same page as current_url (ignoring fragment)
+            if clean_url.split("#")[0] == current_url.split("#")[0]:
+                next_url_is_same_page = True
+
             for start_url in urls:
                 start_parsed = urlparse(start_url)
                 if next_parsed.netloc == start_parsed.netloc:
@@ -200,8 +211,11 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
                         break
             
             if is_allowed or is_within_doc:
-                local_name = get_filename_from_url(clean_url)
-                a["href"] = f"{local_name}#{anchor}" if anchor else local_name
+                if next_url_is_same_page and anchor:
+                    a["href"] = f"#{anchor}"
+                else:
+                    local_name = get_filename_from_url(clean_url)
+                    a["href"] = f"{local_name}#{anchor}" if anchor else local_name
                 
                 # Use normalized URL for checking visited/queue to be consistent
                 norm_clean_url = normalize_url(clean_url)

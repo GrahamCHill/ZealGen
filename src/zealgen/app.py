@@ -186,6 +186,7 @@ class URLSelectionDialog(QDialog):
 
     def get_selected_urls(self):
         selected = []
+        roots = []
         # Process related_list
         for i in range(self.related_list.count()):
             item = self.related_list.item(i)
@@ -196,18 +197,30 @@ class URLSelectionDialog(QDialog):
                 if text.endswith(" *"):
                     text = text[:-2]
                 selected.append(text)
+                roots.append(text)
             elif item.checkState() == Qt.Checked:
                 selected.append(item.text())
         
         # Process other_tree (only children are actual URLs)
         for i in range(self.other_tree.topLevelItemCount()):
             parent = self.other_tree.topLevelItem(i)
+            # If the domain (parent) is checked/partially checked, we might want to treat 
+            # some of its children as new roots if they are "top-level" enough.
+            # For now, let's just collect all selected URLs.
+            
             for j in range(parent.childCount()):
                 child = parent.child(j)
                 if child.checkState(0) == Qt.Checked:
-                    selected.append(child.text(0))
+                    url = child.text(0)
+                    selected.append(url)
+                    # If this URL was explicitly found as a different domain, it's likely a root
+                    # of an optional domain. 
+                    # We add it to roots if it's the first one for this domain or shorter than existing one.
+                    # Actually, the user might want multiple roots on the same domain if they are in different paths.
+                    # But for now, one per domain is a good start.
+                    roots.append(url)
                     
-        return selected
+        return selected, roots
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -377,6 +390,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         
         selected_urls = []
+        root_urls = []
         if self.ignore_optional:
             # If ignore optional, we take only the initial URL or all discovered?
             # Usually "ignore optional" means just do it automatically with defaults.
@@ -387,12 +401,24 @@ class MainWindow(QMainWindow):
             # In URLSelectionDialog, everything is checked by default EXCEPT mandatory which are always in.
             # So I'll take ALL discovered URLs if ignore_optional is True.
             selected_urls = discovered_urls
+            root_urls = [self.current_docset['url']]
+            # Also add other domains as roots if they are in discovered_urls
+            # We only add the shortest URL for each unique domain to avoid redundant roots
+            initial_domain = clean_domain(urlparse(self.current_docset['url']).netloc)
+            other_domains = {}
+            for u in discovered_urls:
+                domain = clean_domain(urlparse(u).netloc)
+                if domain != initial_domain:
+                    if domain not in other_domains or len(u) < len(other_domains[domain]):
+                        other_domains[domain] = u
+            root_urls.extend(other_domains.values())
+            
             self.log_output.append(f"Automatically selected {len(selected_urls)} URLs for {self.current_docset['name']}.")
         else:
             dialog = URLSelectionDialog(discovered_urls, [self.current_docset['url']], self)
             dialog.setWindowTitle(f"Select URLs for {self.current_docset['name']}")
             if dialog.exec() == QDialog.Accepted:
-                selected_urls = dialog.get_selected_urls()
+                selected_urls, root_urls = dialog.get_selected_urls()
             else:
                 self.log_output.append(f"Generation for {self.current_docset['name']} cancelled by user.")
                 self.process_next_docset()
@@ -404,7 +430,7 @@ class MainWindow(QMainWindow):
         else:
             self.run_single_generation(
                 self.current_docset['name'],
-                [self.current_docset['url']],
+                root_urls,
                 selected_urls
             )
 
