@@ -23,6 +23,13 @@ class PlaywrightFetcher(Fetcher):
                 # Wait for any JS to finish rendering content
                 await page.wait_for_timeout(5000)
 
+                # For SPA sites like Three.js, ensure the hash change actually loads content
+                # and if there are examples, wait for them to load.
+                if "#" in url:
+                    # Sometimes we need to force a re-navigation or wait longer for hash routes
+                    await page.wait_for_load_state("networkidle")
+                    await page.wait_for_timeout(2000)
+
                 # Try to expand any common "optional" sidebars or TOCs
                 await page.evaluate("""
                     () => {

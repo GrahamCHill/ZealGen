@@ -101,17 +101,21 @@ async def rewrite_assets(html, base_url, out_dir):
                 content = script.string
                 # Match fetch('...') or fetch("...")
                 fetches = re.findall(r'fetch\(\s*[\'"](.+?)[\'"]\s*\)', content)
-                for fetch_url in fetches:
-                    if fetch_url.startswith("data:"): continue
+                # Also match other common dynamic loading patterns (e.g. THREE.FileLoader)
+                dynamic_loads = re.findall(r'[\'"](.+?\.(?:glb|gltf|obj|mtl|hdr|json|png|jpg|jpeg|webp|mp4|webm|svg|woff2?|ttf|otf|wasm))[\'"]', content)
+                
+                for asset_url in set(fetches + dynamic_loads):
+                    if asset_url.startswith("data:"): continue
                     
-                    absolute_url = urljoin(base_url, fetch_url)
+                    absolute_url = urljoin(base_url, asset_url)
                     if not absolute_url.startswith("http"): continue
                     
-                    tag_type = "json" if "json" in fetch_url.lower() else "script"
+                    ext = pathlib.Path(asset_url.split("?")[0]).suffix.lower()
+                    tag_type = "json" if ext == ".json" else "asset"
                     local_name = await download_and_save_asset(client, absolute_url, out_dir, tag_type)
                     if local_name:
-                        content = content.replace(f"'{fetch_url}'", f"'{local_name}'")
-                        content = content.replace(f'"{fetch_url}"', f'"{local_name}"')
+                        content = content.replace(f"'{asset_url}'", f"'{local_name}'")
+                        content = content.replace(f'"{asset_url}"', f'"{local_name}"')
                 script.string = content
 
         # Handle YouTube embeds in iframes

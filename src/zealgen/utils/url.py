@@ -79,6 +79,9 @@ def get_filename_from_url(url: str) -> str:
     if path.startswith("/"):
         path = path[1:]
     
+    if not path:
+        path = "index.html"
+    
     # Special handling for hash-based routing (e.g. Three.js)
     fragment = parsed.fragment
     use_fragment = False

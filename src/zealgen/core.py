@@ -70,8 +70,20 @@ async def scan(urls, js=False, max_pages=10, progress_callback=None, fetcher_typ
         soup = BeautifulSoup(result.html, "lxml")
         current_url = result.url
         base_parsed = urlparse(current_url)
+
+        # Discovery of links in <a> tags and <iframe> src
+        discovered_links = []
         for a in soup.find_all("a", href=True):
-            next_url = urljoin(current_url, a["href"])
+            discovered_links.append(a["href"])
+        for iframe in soup.find_all("iframe", src=True):
+            discovered_links.append(iframe["src"])
+
+        for raw_value in discovered_links:
+            # If it's a simple fragment link, skip for discovery
+            if raw_value.startswith("#"):
+                continue
+
+            next_url = urljoin(current_url, raw_value)
             
             # Use normalized URL for discovery decision
             norm_next_url = normalize_url(next_url)
@@ -86,12 +98,22 @@ async def scan(urls, js=False, max_pages=10, progress_callback=None, fetcher_typ
             if norm_url not in visited and norm_url not in queue:
                 # More robust within-doc check for scanning too
                 is_within_doc = False
+                next_parsed = urlparse(clean_url)
                 for start_url in urls:
                     start_parsed = urlparse(start_url)
-                    if urlparse(clean_url).netloc == start_parsed.netloc:
+                    if next_parsed.netloc == start_parsed.netloc:
                         base_path = start_parsed.path.rsplit('/', 1)[0]
                         if not base_path.endswith('/'): base_path += '/'
-                        if urlparse(clean_url).path.startswith(base_path):
+                        
+                        # RELAXED CHECK: allow /examples/ if we are in /docs/ or vice versa on same domain
+                        if next_parsed.path.startswith(base_path):
+                            is_within_doc = True
+                            break
+                        
+                        # Heuristic for related paths
+                        related_patterns = ["/examples", "/samples", "/demo", "/docs", "/api", "/manual"]
+                        is_related = any(p in next_parsed.path.lower() for p in related_patterns)
+                        if is_related:
                             is_within_doc = True
                             break
                 
@@ -117,7 +139,7 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
             fetcher = PlaywrightFetcher()
     else:
         fetcher = HttpxFetcher()
-    builder = DocsetBuilder(output)
+    builder = DocsetBuilder(output, main_url=main_url)
     doc_dir = pathlib.Path(builder.documents_path)
     
     visited = set()
@@ -169,14 +191,20 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
         soup = BeautifulSoup(result.html, "lxml")
         current_url = result.url
         base_parsed = urlparse(current_url)
+
+        # Discovery of links in <a> tags and <iframe> src
+        links_to_process = []
         for a in soup.find_all("a", href=True):
-            raw_href = a["href"]
-            
+            links_to_process.append((a, "href", a["href"]))
+        for iframe in soup.find_all("iframe", src=True):
+            links_to_process.append((iframe, "src", iframe["src"]))
+
+        for element, attr, raw_value in links_to_process:
             # If it's a simple fragment link, keep it as is
-            if raw_href.startswith("#"):
+            if raw_value.startswith("#"):
                 continue
 
-            next_url = urljoin(current_url, raw_href)
+            next_url = urljoin(current_url, raw_value)
             
             # Use normalized URL for discovery decision
             norm_next_url = normalize_url(next_url)
@@ -219,16 +247,26 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
                     base_path = start_parsed.path.rsplit('/', 1)[0]
                     if not base_path.endswith('/'):
                         base_path += '/'
+                    
+                    # RELAXED CHECK: allow /examples/ if we are in /docs/ or vice versa on same domain
+                    # This is generalized by allowing siblings of the base path if they look like documentation/examples
                     if next_parsed.path.startswith(base_path):
+                        is_within_doc = True
+                        break
+                    
+                    # Heuristic for related paths
+                    related_patterns = ["/examples", "/samples", "/demo", "/docs", "/api", "/manual"]
+                    is_related = any(p in next_parsed.path.lower() for p in related_patterns)
+                    if is_related:
                         is_within_doc = True
                         break
             
             if is_allowed or is_within_doc or is_root_domain:
-                if next_url_is_same_page and anchor:
-                    a["href"] = f"#{anchor}"
+                if next_url_is_same_page and anchor and element.name == "a":
+                    element[attr] = f"#{anchor}"
                 else:
                     local_name = get_filename_from_url(clean_url)
-                    a["href"] = f"{local_name}#{anchor}" if anchor else local_name
+                    element[attr] = f"{local_name}#{anchor}" if anchor else local_name
                 
                 # Use normalized URL for checking visited/queue to be consistent
                 norm_clean_url = normalize_url(clean_url)
@@ -240,13 +278,15 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
             else:
                 # If it's not within doc and not allowed, at least make it absolute if it was relative
                 # so it doesn't break in the flat docset structure.
-                a["href"] = next_url
+                element[attr] = next_url
         
         updated_html = await rewrite_assets(str(soup), url, doc_dir)
         
         # Determine norm_url for comparison with main_url
         norm_url = normalize_url(url)
-        is_main = (norm_url == norm_main_url)
+        # Also check against the final URL in case of redirects
+        norm_final_url = normalize_url(result.url)
+        is_main = (norm_url == norm_main_url or norm_final_url == norm_main_url)
         
         pages_count += 1
         

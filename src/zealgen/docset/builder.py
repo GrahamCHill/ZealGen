@@ -3,10 +3,11 @@ import shutil
 import plistlib
 import httpx
 from .index import DocsetIndex
-from ..utils.url import get_filename_from_url
+from ..utils.url import get_filename_from_url, normalize_url, clean_domain
+from urllib.parse import urlparse
 
 class DocsetBuilder:
-    def __init__(self, output_path):
+    def __init__(self, output_path, main_url=None):
         self.docset_name = os.path.basename(output_path).replace(".docset", "")
         self.base_path = output_path
         self.contents_path = os.path.join(self.base_path, "Contents")
@@ -17,6 +18,9 @@ class DocsetBuilder:
         self._setup_directories()
         self.first_page = None
         self.main_page = None
+        self.main_url = normalize_url(main_url) if main_url else None
+        self.main_domain = clean_domain(urlparse(main_url).netloc) if main_url else None
+        self.all_pages = [] # List of (filename, url)
         self.has_icon = False
 
     def _setup_directories(self):
@@ -42,8 +46,14 @@ class DocsetBuilder:
 
     def add_page(self, parsed_page, url, is_main=False):
         filename = get_filename_from_url(url)
-        if is_main:
-            self.main_page = filename
+        self.all_pages.append((filename, url))
+        
+        # Check if this should be the main page
+        if not self.main_page:
+            if is_main:
+                self.main_page = filename
+            elif self.main_url and normalize_url(url) == self.main_url:
+                self.main_page = filename
             
         if not self.first_page:
             self.first_page = filename
@@ -61,18 +71,47 @@ class DocsetBuilder:
         self.index.close()
 
     def _write_info_plist(self):
-        index_file = self.main_page or self.first_page or "index.html"
+        index_file = self.main_page
         
-        # If a literal index.html exists, it might be a better choice only if we don't have a main_page
-        if not self.main_page and os.path.exists(os.path.join(self.documents_path, "index.html")):
-            index_file = "index.html"
+        # If no explicit main page, look for candidates
+        if not index_file:
+            # 1. Look for index.html from the primary domain
+            if self.main_domain:
+                domain_index = f"{self.main_domain}_index.html"
+                if os.path.exists(os.path.join(self.documents_path, domain_index)):
+                    index_file = domain_index
+            
+            # 2. Look for FrontPage from the primary domain
+            if not index_file and self.main_domain:
+                for filename, _ in self.all_pages:
+                    if filename.startswith(self.main_domain + "_") and "FrontPage" in filename:
+                        index_file = filename
+                        break
+            
+            # 3. Look for ANY page from the primary domain
+            if not index_file and self.main_domain:
+                for filename, _ in self.all_pages:
+                    if filename.startswith(self.main_domain + "_"):
+                        index_file = filename
+                        break
+
+            # Only allow fallbacks if no main domain was specified
+            # or if they belong to the main domain (though steps 1-3 already covered that)
+            if not index_file and not self.main_domain:
+                # 4. Fallback to literal index.html
+                if os.path.exists(os.path.join(self.documents_path, "index.html")):
+                    index_file = "index.html"
+                
+                # 5. Fallback to the first page processed
+                if not index_file:
+                    index_file = self.first_page
 
         info = {
             "CFBundleIdentifier": self.docset_name.lower(),
             "CFBundleName": self.docset_name,
             "DocSetPlatformFamily": self.docset_name.lower(),
             "isDashDocset": True,
-            "dashIndexFilePath": index_file,
+            "dashIndexFilePath": index_file or "index.html",
         }
         with open(os.path.join(self.contents_path, "Info.plist"), "wb") as f:
             plistlib.dump(info, f)
