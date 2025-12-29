@@ -1,5 +1,7 @@
 import anyio
 import pathlib
+import os
+from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from .fetch.httpx_fetcher import HttpxFetcher
@@ -12,7 +14,12 @@ from .parsers import sphinx, docusaurus, rustdoc, generic
 from .docset.builder import DocsetBuilder
 from .assets.rewrite import rewrite_assets, get_favicon_url
 
-from .utils.url import get_filename_from_url, normalize_url, clean_domain
+from .utils.url import get_filename_from_url, normalize_url, clean_domain, get_base_domain
+
+# Load environment variables from .env file
+load_dotenv()
+
+DEFAULT_MAX_PAGES = int(os.getenv("TOTAL_PAGES", 250))
 
 PARSERS = [
     sphinx.SphinxParser(),
@@ -21,7 +28,56 @@ PARSERS = [
     generic.GenericParser(),
 ]
 
-async def scan(urls, js=False, max_pages=10, progress_callback=None, fetcher_type="playwright", log_callback=None):
+def is_url_within_doc(url, start_urls, related_patterns=None):
+    if related_patterns is None:
+        related_patterns = ["/examples", "/samples", "/demo", "/docs", "/api", "/manual", "/wiki"]
+    
+    next_parsed = urlparse(url)
+    next_domain = clean_domain(next_parsed.netloc)
+    next_base_domain = get_base_domain(next_domain)
+    
+    # Check against all start URLs
+    for start_url in start_urls:
+        start_parsed = urlparse(start_url)
+        start_domain = clean_domain(start_parsed.netloc)
+        start_base_domain = get_base_domain(start_domain)
+        
+        # 1. Exact domain match
+        if next_domain == start_domain:
+            base_path = start_parsed.path.rsplit('/', 1)[0]
+            if not base_path.endswith('/'):
+                base_path += '/'
+            
+            if next_parsed.path.startswith(base_path):
+                return True
+
+        # 2. Same base domain (e.g. wiki.libsdl.org and examples.libsdl.org)
+        if next_base_domain and next_base_domain == start_base_domain:
+            # For same base domain, we are more relaxed but still check for documentation-like patterns
+            # or if it's under a similar path structure.
+            is_related = any(p in next_parsed.path.lower() for p in related_patterns)
+            # Also check if netloc contains related patterns (e.g. examples.libsdl.org)
+            is_related = is_related or any(p.strip("/") in next_parsed.netloc.lower() for p in related_patterns)
+            
+            if is_related:
+                return True
+            
+            # If the start URL path is just / or /SDL3/, and the next URL is also under /SDL3/
+            # even on a different subdomain of the same base domain, it's likely related.
+            start_path = start_parsed.path
+            if start_path and start_path != "/" and next_parsed.path.startswith(start_path):
+                return True
+
+    # 3. Heuristic for related patterns on ANY domain (maybe too broad? Let's keep it to same base domain for now
+    # but the original code was doing it for any domain if it reached there).
+    # Actually, the original code ONLY did it if next_domain == start_domain.
+    # Wait, let me re-read the original code.
+    
+    return False
+
+async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_type="playwright", log_callback=None):
+    if max_pages is None:
+        max_pages = DEFAULT_MAX_PAGES
     def log(message):
         if log_callback:
             log_callback(message)
@@ -105,36 +161,15 @@ async def scan(urls, js=False, max_pages=10, progress_callback=None, fetcher_typ
                 # Add to discovered even if not within doc, so user can choose it
                 discovered.add(clean_url)
 
-                # More robust within-doc check for scanning too
-                is_within_doc = False
-                next_parsed = urlparse(clean_url)
-                next_domain = clean_domain(next_parsed.netloc)
-                for start_url in urls:
-                    start_parsed = urlparse(start_url)
-                    start_domain = clean_domain(start_parsed.netloc)
-                    if next_domain == start_domain:
-                        base_path = start_parsed.path.rsplit('/', 1)[0]
-                        if not base_path.endswith('/'): base_path += '/'
-                        
-                        # RELAXED CHECK: allow /examples/ if we are in /docs/ or vice versa on same domain
-                        if next_parsed.path.startswith(base_path):
-                            is_within_doc = True
-                            break
-                        
-                        # Heuristic for related patterns on same domain
-                        related_patterns = ["/examples", "/samples", "/demo", "/docs", "/api", "/manual"]
-                        is_related = any(p in next_parsed.path.lower() for p in related_patterns)
-                        if is_related:
-                            is_within_doc = True
-                            break
-                
-                if is_within_doc:
+                if is_url_within_doc(clean_url, urls):
                     if len(visited) < max_pages:
                         queue.append(clean_url)
 
     return sorted(list(discovered))
 
-async def generate(urls, output, js=False, max_pages=100, progress_callback=None, allowed_urls=None, fetcher_type="playwright", log_callback=None):
+async def generate(urls, output, js=False, max_pages=None, progress_callback=None, allowed_urls=None, fetcher_type="playwright", log_callback=None):
+    if max_pages is None:
+        max_pages = DEFAULT_MAX_PAGES
     def log(message):
         if log_callback:
             log_callback(message)
@@ -239,38 +274,14 @@ async def generate(urls, output, js=False, max_pages=100, progress_callback=None
             # 1. If it's explicitly in allowed_urls
             # 2. OR if it matches the domain/path heuristic (stay within same documentation)
             is_allowed = bool(allowed_urls and normalize_url(clean_url) in allowed_urls)
+            is_within_doc = is_url_within_doc(clean_url, urls)
             
-            # More robust within-doc check
-            # We want to stay on the same domain and at or below the base path of the starting URLs
-            is_within_doc = False
             next_url_is_same_page = False
             
             # Check if next_url is the same page as current_url (ignoring fragment)
             if clean_url.split("#")[0] == current_url.split("#")[0]:
                 next_url_is_same_page = True
 
-            for start_url in urls:
-                start_parsed = urlparse(start_url)
-                start_domain = clean_domain(start_parsed.netloc)
-                if next_domain == start_domain:
-                    # Check if next_url is under the same base path
-                    base_path = start_parsed.path.rsplit('/', 1)[0]
-                    if not base_path.endswith('/'):
-                        base_path += '/'
-                    
-                    # RELAXED CHECK: allow /examples/ if we are in /docs/ or vice versa on same domain
-                    # This is generalized by allowing siblings of the base path if they look like documentation/examples
-                    if next_parsed.path.startswith(base_path):
-                        is_within_doc = True
-                        break
-                    
-                    # Heuristic for related paths on same domain
-                    related_patterns = ["/examples", "/samples", "/demo", "/docs", "/api", "/manual"]
-                    is_related = any(p in next_parsed.path.lower() for p in related_patterns)
-                    if is_related:
-                        is_within_doc = True
-                        break
-            
             if is_allowed or is_within_doc:
                 if next_url_is_same_page and anchor and element.name == "a":
                     element[attr] = f"#{anchor}"

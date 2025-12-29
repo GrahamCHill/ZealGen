@@ -12,6 +12,7 @@ dependencies = [
     "httpx",
     "playwright",
     "anyio",
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]

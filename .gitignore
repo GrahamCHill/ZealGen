@@ -11,3 +11,8 @@
 /src/zealgen/build
 /src/zealgen/dist
 .output.txt
+/docTest
+.env
+/dist
+/build
+

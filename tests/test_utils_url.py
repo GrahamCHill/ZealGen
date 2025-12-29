@@ -30,7 +30,7 @@ class TestUrlUtils(unittest.TestCase):
             ("https://example.com/", "example.com_index.html"),
             ("https://example.com/page.html", "example.com_page.html"),
             ("https://example.com/dir/", "example.com_dir_index.html"),
-            ("https://sub.example.com/path/to/file", "sub.example.com_path_to_file.html"),
+            ("https://sub.example.com/path/to/file", "sub.example.com_path_to_file_index.html"),
         ]
         for url, expected in cases:
             with self.subTest(url=url):

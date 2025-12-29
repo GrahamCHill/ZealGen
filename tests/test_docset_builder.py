@@ -26,7 +26,7 @@ class TestDocsetBuilder(unittest.TestCase):
         page = ParsedPage(None, "<html><body>Content</body></html>", [("Sym", "Type", "anchor")])
         builder.add_page(page, "https://example.com/page")
         
-        expected_file = os.path.join(builder.documents_path, "example.com_page.html")
+        expected_file = os.path.join(builder.documents_path, "example.com_page_index.html")
         self.assertTrue(os.path.exists(expected_file))
         
         # Check index
@@ -34,7 +34,7 @@ class TestDocsetBuilder(unittest.TestCase):
         conn = sqlite3.connect(os.path.join(builder.resources_path, "docSet.dsidx"))
         cursor = conn.execute("SELECT name, type, path FROM searchIndex")
         row = cursor.fetchone()
-        self.assertEqual(row, ("Sym", "Type", "example.com_page.html#anchor"))
+        self.assertEqual(row, ("Sym", "Type", "example.com_page_index.html#anchor"))
         conn.close()
 
 if __name__ == "__main__":

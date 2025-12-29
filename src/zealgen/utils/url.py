@@ -46,34 +46,42 @@ def normalize_url(url: str) -> str:
         
     return res.lower()
 
+def get_base_domain(domain: str) -> str:
+    """Get the base domain (e.g. example.com from sub.example.com).
+    This is a simple version that might not handle all TLDs correctly
+    but works for common ones like .org, .com, .net."""
+    parts = domain.split(".")
+    if len(parts) >= 2:
+        # Check for common two-part TLDs like .co.uk
+        if len(parts) >= 3 and parts[-2] in ["co", "com", "org", "net", "edu", "gov"]:
+             return ".".join(parts[-3:])
+        return ".".join(parts[-2:])
+    return domain
+
 def get_filename_from_url(url: str) -> str:
     # Normalize the URL first to handle index files consistently
     parsed = urlparse(url)
     domain = clean_domain(parsed.netloc)
     
     path = parsed.path
-    # Remove common index files
+    
+    # Standardize path: remove common index files to be consistent with normalize_url
     for index_file in ["/index.html", "/index.htm", "/index.php", "/index.jsp", "/index.asp"]:
         if path.lower().endswith(index_file):
             path = path[:-len(index_file)]
-            if not path or not path.endswith("/"):
-                path += "/"
             break
 
+    # If it ends with / or is empty, it's definitely an index page
     if not path or path.endswith("/"):
+        if not path.endswith("/"):
+            path += "/"
         path += "index.html"
     elif "." not in path.split("/")[-1]:
-        # If no extension in the last part of path, it could be a file without extension
-        # or a directory without a trailing slash. 
-        # For documentation sites, it's often a file (e.g. sphinx or similar).
-        # But for many others it's a directory.
-        # Let's keep it as is and append .html to be safe, unless it's a known directory pattern.
-        path += ".html"
-    elif not (path.lower().endswith(".html") or path.lower().endswith(".htm")):
-        # It has an extension but it's not html, e.g. .php
-        # We want to keep the original extension in the filename but append .html
-        # wait, if it's .php we usually want it to be .php.html
-        pass # Will be handled by the end block
+        # If no extension in the last part of path, we treat it as a directory
+        # to be consistent with the trailing slash case, since normalize_url
+        # treats them the same. 
+        # Most documentation tools (Sphinx, Docusaurus) use directories for clean URLs.
+        path += "/index.html"
     
     # Remove leading slash
     if path.startswith("/"):

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal, QStandardPaths
-from .core import generate, scan
+from .core import generate, scan, DEFAULT_MAX_PAGES
 from .utils.url import normalize_url, clean_domain
 
 class ScanWorker(QThread):
@@ -33,7 +33,7 @@ class ScanWorker(QThread):
             def report_progress(current, total):
                 self.progress.emit(current, total)
 
-            discovered = anyio.run(scan, self.urls, self.js, 20, report_progress, self.fetcher_type, self.log.emit)
+            discovered = anyio.run(scan, self.urls, self.js, DEFAULT_MAX_PAGES, report_progress, self.fetcher_type, self.log.emit)
             self.finished.emit(discovered)
         except Exception as e:
             self.error.emit(str(e))
@@ -63,7 +63,7 @@ class MultiWorker(QThread):
                 def report_progress(current, total):
                     self.progress.emit(current, total)
 
-                anyio.run(generate, urls, output_path, self.js, 100, report_progress, allowed_urls, self.fetcher_type, self.log.emit)
+                anyio.run(generate, urls, output_path, self.js, DEFAULT_MAX_PAGES, report_progress, allowed_urls, self.fetcher_type, self.log.emit)
             
             self.finished.emit()
         except Exception as e:
