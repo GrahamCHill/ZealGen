@@ -168,6 +168,30 @@ async def rewrite_assets(html, base_url, out_dir):
                     style = style.replace(url, local_name)
             el["style"] = style
 
+        # Handle inline event handlers like onmouseover/onmouseout attributes
+        event_handlers = ["onmouseover", "onmouseout", "onclick", "onload"]
+        for handler in event_handlers:
+            for el in soup.find_all(attrs={handler: True}):
+                content = el[handler]
+                # Match both absolute paths and relative paths that look like assets
+                # Also handle potentially quoted URLs inside the handler string
+                urls = re.findall(r'[\'"]([^\'"]+?\.(?:png|jpg|jpeg|webp|gif|svg|mp4|webm|js|css))[\'"]', content)
+                for url in set(urls):
+                    if url.startswith("data:"): continue
+                    absolute_url = urljoin(base_url, url)
+                    if not absolute_url.startswith("http"):
+                        continue
+                    
+                    ext = pathlib.Path(url.split("?")[0]).suffix.lower()
+                    tag_type = "img" if ext in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"] else "asset"
+                    
+                    local_name = await download_and_save_asset(client, absolute_url, out_dir, tag_type)
+                    if local_name:
+                        # Ensure we only replace the exact URL inside quotes
+                        content = content.replace(f"'{url}'", f"'{local_name}'")
+                        content = content.replace(f'"{url}"', f'"{local_name}"')
+                el[handler] = content
+
     return str(soup)
 
 async def rewrite_css_assets(client, css_path, base_url, out_dir):
