@@ -174,13 +174,7 @@ class URLSelectionDialog(QDialog):
         self.other_tree.blockSignals(False)
 
     def select_all_optional(self):
-        # Select all in the related list
-        for i in range(self.related_list.count()):
-            item = self.related_list.item(i)
-            if item.checkState() is not None:
-                item.setCheckState(Qt.Checked)
-
-        # Select all in the other tree
+        # Select all in the other tree (right window)
         for i in range(self.other_tree.topLevelItemCount()):
             item = self.other_tree.topLevelItem(i)
             item.setCheckState(0, Qt.Checked)
@@ -188,13 +182,7 @@ class URLSelectionDialog(QDialog):
                 item.child(j).setCheckState(0, Qt.Checked)
 
     def deselect_all_optional(self):
-        # Deselect all in the related list
-        for i in range(self.related_list.count()):
-            item = self.related_list.item(i)
-            if item.checkState() is not None:
-                item.setCheckState(Qt.Unchecked)
-
-        # Deselect all in the other tree
+        # Deselect all in the other tree (right window)
         for i in range(self.other_tree.topLevelItemCount()):
             item = self.other_tree.topLevelItem(i)
             item.setCheckState(0, Qt.Unchecked)
