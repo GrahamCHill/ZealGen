@@ -75,7 +75,7 @@ def is_url_within_doc(url, start_urls, related_patterns=None):
     
     return False
 
-async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_type="playwright", log_callback=None):
+async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_type="playwright", log_callback=None, verbose_callback=None):
     if max_pages is None:
         max_pages = DEFAULT_MAX_PAGES
     def log(message):
@@ -84,13 +84,27 @@ async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_t
         else:
             print(message)
 
+    def v_log(message):
+        if verbose_callback:
+            verbose_callback(message)
+        elif log_callback:
+            log_callback(f"[VERBOSE] {message}")
+        else:
+            print(f"DEBUG: {message}")
+
+    v_log(f"Starting scan for: {urls}")
     if js:
+        v_log(f"JavaScript enabled, using {fetcher_type}")
         if fetcher_type == "qt" and QtFetcher:
             fetcher = QtFetcher()
         else:
             fetcher = PlaywrightFetcher()
     else:
+        v_log("JavaScript disabled, using httpx")
         fetcher = HttpxFetcher()
+    
+    if hasattr(fetcher, 'set_verbose_callback'):
+        fetcher.set_verbose_callback(v_log)
     
     visited = set()
     queue = list(urls)
@@ -101,10 +115,12 @@ async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_t
         url = queue.pop(0)
         norm_url = normalize_url(url)
         if norm_url in visited:
+            v_log(f"Skipping already visited: {url}")
             continue
         visited.add(norm_url)
         discovered.add(url)
         
+        v_log(f"Processing ({pages_count + 1}/{max_pages}): {url}")
         if progress_callback:
             progress_callback(pages_count, max_pages)
         
@@ -163,11 +179,16 @@ async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_t
 
                 if is_url_within_doc(clean_url, urls):
                     if len(visited) < max_pages:
+                        v_log(f"Found new link within doc: {clean_url}")
                         queue.append(clean_url)
+                    else:
+                        v_log(f"Max pages reached, not adding link: {clean_url}")
+                else:
+                    v_log(f"Found external link: {clean_url}")
 
     return sorted(list(discovered))
 
-async def generate(urls, output, js=False, max_pages=None, progress_callback=None, allowed_urls=None, fetcher_type="playwright", log_callback=None):
+async def generate(urls, output, js=False, max_pages=None, progress_callback=None, allowed_urls=None, fetcher_type="playwright", log_callback=None, verbose_callback=None):
     if max_pages is None:
         max_pages = DEFAULT_MAX_PAGES
     def log(message):
@@ -176,6 +197,15 @@ async def generate(urls, output, js=False, max_pages=None, progress_callback=Non
         else:
             print(message)
 
+    def v_log(message):
+        if verbose_callback:
+            verbose_callback(message)
+        elif log_callback:
+            log_callback(f"[VERBOSE] {message}")
+        else:
+            print(f"DEBUG: {message}")
+
+    v_log(f"Starting generation to {output}")
     if not urls:
         return
 
@@ -183,12 +213,18 @@ async def generate(urls, output, js=False, max_pages=None, progress_callback=Non
     norm_main_url = normalize_url(main_url)
 
     if js:
+        v_log(f"JavaScript enabled, using {fetcher_type}")
         if fetcher_type == "qt" and QtFetcher:
             fetcher = QtFetcher()
         else:
             fetcher = PlaywrightFetcher()
     else:
+        v_log("JavaScript disabled, using httpx")
         fetcher = HttpxFetcher()
+    
+    if hasattr(fetcher, 'set_verbose_callback'):
+        fetcher.set_verbose_callback(v_log)
+    
     builder = DocsetBuilder(output, main_url=main_url, log_callback=log_callback)
     doc_dir = pathlib.Path(builder.documents_path)
     
@@ -205,13 +241,16 @@ async def generate(urls, output, js=False, max_pages=None, progress_callback=Non
         url = queue.pop(0)
         norm_url = normalize_url(url)
         if norm_url in visited:
+            v_log(f"Skipping already visited: {url}")
             continue
         
         if allowed_urls and norm_url not in allowed_urls:
+            v_log(f"Skipping URL not in allowed list: {url}")
             continue
 
         visited.add(norm_url)
         
+        v_log(f"Fetching and processing ({pages_count + 1}/{max_pages}): {url}")
         if progress_callback:
             progress_callback(pages_count, max_pages)
         
@@ -295,10 +334,12 @@ async def generate(urls, output, js=False, max_pages=None, progress_callback=Non
                 if norm_clean_url not in visited and norm_clean_url not in queue:
                      # Only follow links that are allowed or within doc
                      if is_allowed or is_within_doc:
+                        v_log(f"Added link to queue: {clean_url}")
                         queue.append(clean_url)
             else:
                 # If it's not within doc and not allowed, at least make it absolute if it was relative
                 # so it doesn't break in the flat docset structure.
+                v_log(f"External/disallowed link, keeping absolute: {next_url}")
                 element[attr] = next_url
         
         updated_html = await rewrite_assets(str(soup), url, doc_dir)

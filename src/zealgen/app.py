@@ -20,6 +20,7 @@ class ScanWorker(QThread):
     finished = Signal(list)
     error = Signal(str)
     log = Signal(str)
+    verbose_log = Signal(str)
     progress = Signal(int, int)
 
     def __init__(self, urls, js, fetcher_type="playwright"):
@@ -33,7 +34,7 @@ class ScanWorker(QThread):
             def report_progress(current, total):
                 self.progress.emit(current, total)
 
-            discovered = anyio.run(scan, self.urls, self.js, DEFAULT_MAX_PAGES, report_progress, self.fetcher_type, self.log.emit)
+            discovered = anyio.run(scan, self.urls, self.js, DEFAULT_MAX_PAGES, report_progress, self.fetcher_type, self.log.emit, self.verbose_log.emit)
             self.finished.emit(discovered)
         except Exception as e:
             self.error.emit(str(e))
@@ -42,6 +43,7 @@ class MultiWorker(QThread):
     finished = Signal()
     error = Signal(str)
     log = Signal(str)
+    verbose_log = Signal(str)
     progress = Signal(int, int)
 
     def __init__(self, docsets_to_generate, output_base, js, fetcher_type="playwright"):
@@ -63,7 +65,7 @@ class MultiWorker(QThread):
                 def report_progress(current, total):
                     self.progress.emit(current, total)
 
-                anyio.run(generate, urls, output_path, self.js, DEFAULT_MAX_PAGES, report_progress, allowed_urls, self.fetcher_type, self.log.emit)
+                anyio.run(generate, urls, output_path, self.js, DEFAULT_MAX_PAGES, report_progress, allowed_urls, self.fetcher_type, self.log.emit, self.verbose_log.emit)
             
             self.finished.emit()
         except Exception as e:
@@ -432,9 +434,17 @@ class MainWindow(QMainWindow):
 
         # Logs
         layout.addWidget(QLabel("Logs:"))
+        self.log_tabs = QTabWidget()
+        
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        layout.addWidget(self.log_output)
+        self.log_tabs.addTab(self.log_output, "General")
+        
+        self.verbose_log_output = QTextEdit()
+        self.verbose_log_output.setReadOnly(True)
+        self.log_tabs.addTab(self.verbose_log_output, "Verbose")
+        
+        layout.addWidget(self.log_tabs)
 
         # Generate button
         self.generate_btn = QPushButton("Generate Docset")
@@ -531,6 +541,7 @@ class MainWindow(QMainWindow):
         self.scan_worker.error.connect(self.on_error)
         self.scan_worker.progress.connect(self.update_progress)
         self.scan_worker.log.connect(lambda m: self.log_output.append(m))
+        self.scan_worker.verbose_log.connect(lambda m: self.verbose_log_output.append(m))
         self.scan_worker.start()
 
     def on_scan_finished(self, discovered_urls):
@@ -582,6 +593,7 @@ class MainWindow(QMainWindow):
         self.worker.error.connect(self.on_error)
         self.worker.progress.connect(self.update_progress)
         self.worker.log.connect(lambda m: self.log_output.append(m))
+        self.worker.verbose_log.connect(lambda m: self.verbose_log_output.append(m))
         self.worker.start()
 
     def on_generation_finished(self):

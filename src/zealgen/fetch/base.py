@@ -7,6 +7,16 @@ class FetchResult:
 
 
 class Fetcher(ABC):
+    def __init__(self):
+        self.verbose_callback = None
+
+    def set_verbose_callback(self, callback):
+        self.verbose_callback = callback
+
+    def v_log(self, message):
+        if self.verbose_callback:
+            self.verbose_callback(message)
+
     @abstractmethod
     async def fetch(self, url: str) -> FetchResult:
         pass

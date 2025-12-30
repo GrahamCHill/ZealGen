@@ -3,6 +3,7 @@ from .base import Fetcher, FetchResult
 
 class PlaywrightFetcher(Fetcher):
     async def fetch(self, url: str) -> FetchResult:
+        self.v_log(f"Fetching with Playwright: {url}")
         try:
             from playwright.async_api import async_playwright
         except ImportError:
@@ -28,13 +29,14 @@ class PlaywrightFetcher(Fetcher):
 
                     async def intercept_route(route):
                         try:
-                            try:
-                                response = await route.fetch()
-                            except Exception:
-                                # Page or context might have closed
-                                return
-
+                            # Only intercept and fetch if it's a WASM file
                             if ".wasm" in route.request.url.split('?')[0]:
+                                try:
+                                    response = await route.fetch()
+                                except Exception:
+                                    # Page or context might have closed
+                                    return
+
                                 try:
                                     body = await response.body()
                                 except Exception:
@@ -61,6 +63,7 @@ class PlaywrightFetcher(Fetcher):
                                         return
                                     except Exception:
                                         pass
+                            
                             try:
                                 await route.continue_()
                             except Exception:
@@ -71,24 +74,53 @@ class PlaywrightFetcher(Fetcher):
                     await page.route("**/*", intercept_route)
 
                     try:
-                        # Using a shorter timeout for navigation that might be a download
-                        await page.goto(url, wait_until="networkidle", timeout=30000)
+                        self.v_log(f"Navigating to {url}...")
+                        # Try "domcontentloaded" first as it's fastest and most reliable for content
+                        # then "load", and finally "networkidle" if needed.
+                        # Some sites have slow background requests that break "networkidle".
+                        try:
+                            # Increased timeout to 60s for slow sites
+                            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                            self.v_log("domcontentloaded reached")
+                            # If we got DOM, try to wait for load state briefly but don't fail if they timeout
+                            try:
+                                await page.wait_for_load_state("load", timeout=10000)
+                                self.v_log("load state reached")
+                            except Exception:
+                                pass
+                        except Exception:
+                            self.v_log("domcontentloaded failed, falling back to commit")
+                            # Fallback to a simple goto with commit if domcontentloaded failed
+                            # "commit" ensures the server responded and document started loading
+                            await page.goto(url, wait_until="commit", timeout=60000)
+                            # After commit, we try to wait for any content to appear
+                            try:
+                                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+                                self.v_log("domcontentloaded reached after commit fallback")
+                            except Exception:
+                                pass
                     except Exception as e:
                         if "Download is starting" in str(e):
                             return FetchResult(url, f"<html><body>Download started for {url}</body></html>")
                         raise e
                     
                     # Wait for any JS to finish rendering content
+                    self.v_log("Waiting for JS to finish rendering...")
                     await page.wait_for_timeout(5000)
 
                     # For SPA sites like Three.js, ensure the hash change actually loads content
                     # and if there are examples, wait for them to load.
                     if "#" in url:
+                        self.v_log("Handling hash URL, waiting for networkidle...")
                         # Sometimes we need to force a re-navigation or wait longer for hash routes
-                        await page.wait_for_load_state("networkidle")
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=10000)
+                        except Exception:
+                            self.v_log("networkidle timeout for hash URL, proceeding anyway")
                         await page.wait_for_timeout(2000)
 
                     # Try to expand any common "optional" sidebars or TOCs
+                    self.v_log("Expanding sidebars and menus...")
                     await page.evaluate("""
                         () => {
                             const patterns = [
@@ -98,20 +130,44 @@ class PlaywrightFetcher(Fetcher):
                                 /expand/i,
                                 /sidebar/i
                             ];
-                            const buttons = Array.from(document.querySelectorAll('button, a, .button, [role="button"]'));
-                            for (const btn of buttons) {
-                                const text = (btn.innerText || btn.title || btn.ariaLabel || "").trim();
-                                if (patterns.some(p => p.test(text))) {
-                                    // Check if it's likely collapsed (common patterns)
+                            const elements = Array.from(document.querySelectorAll('button, a, span, .button, [role="button"]'));
+                            for (const el of elements) {
+                                const text = (el.innerText || el.title || el.ariaLabel || "").trim();
+                                
+                                // Check if it matches patterns or has common expansion classes
+                                const matchesPattern = patterns.some(p => p.test(text));
+                                const hasExpansionClass = 
+                                    el.classList.contains('closed') || 
+                                    el.classList.contains('collapsed') ||
+                                    el.getAttribute('aria-expanded') === 'false';
+                                
+                                if (matchesPattern || hasExpansionClass) {
+                                    // Verify it's actually collapsed
                                     const isCollapsed = 
-                                        btn.getAttribute('aria-expanded') === 'false' || 
-                                        btn.classList.contains('collapsed') ||
-                                        btn.classList.contains('closed');
+                                        el.getAttribute('aria-expanded') === 'false' || 
+                                        el.classList.contains('collapsed') ||
+                                        el.classList.contains('closed') ||
+                                        (el.nextElementSibling && (
+                                            el.nextElementSibling.style.display === 'none' || 
+                                            getComputedStyle(el.nextElementSibling).display === 'none'
+                                        ));
                                     
                                     if (isCollapsed) {
                                         try {
-                                            btn.click();
-                                            console.log("Clicked to expand: " + text);
+                                            // Some sites need a real click, others might just need the class changed
+                                            // but clicking is safer for JS-driven menus.
+                                            el.click();
+                                            
+                                            // If it's still closed after click (e.g. no JS), try to force it
+                                            if (el.classList.contains('closed')) {
+                                                el.classList.remove('closed');
+                                                el.classList.add('opened');
+                                            }
+                                            if (el.nextElementSibling && 
+                                                (el.nextElementSibling.style.display === 'none' || 
+                                                 getComputedStyle(el.nextElementSibling).display === 'none')) {
+                                                el.nextElementSibling.style.display = 'block';
+                                            }
                                         } catch (e) {}
                                     }
                                 }
@@ -123,6 +179,7 @@ class PlaywrightFetcher(Fetcher):
                     await page.wait_for_timeout(1000)
                     
                     # Scroll from top to bottom to trigger lazy-loading content
+                    self.v_log("Scrolling to trigger lazy-loading...")
                     await page.evaluate("""
                         async () => {
                             await new Promise((resolve) => {
@@ -133,11 +190,17 @@ class PlaywrightFetcher(Fetcher):
                                     window.scrollBy(0, distance);
                                     totalHeight += distance;
 
-                                    if(totalHeight >= scrollHeight){
+                                    // Safety exit after 1000 steps (100k pixels) or 30 seconds
+                                    if(totalHeight >= scrollHeight || totalHeight > 100000){
                                         clearInterval(timer);
                                         resolve();
                                     }
                                 }, 100);
+                                // Absolute timeout after 30 seconds
+                                setTimeout(() => {
+                                    clearInterval(timer);
+                                    resolve();
+                                }, 30000);
                             });
                             window.scrollTo(0, 0);
                         }
@@ -145,9 +208,14 @@ class PlaywrightFetcher(Fetcher):
 
                     # Try to extract content from iframes and inject it into the main page.
                     # Many documentation sites use iframes for the main content (e.g. Three.js).
-                    for frame in page.frames:
+                    self.v_log(f"Checking {len(page.frames)} frames for content...")
+                    for i, frame in enumerate(page.frames):
                         if frame == page.main_frame:
                             continue
+                        
+                        # Limit to processing first 20 frames to avoid hanging on ad-heavy sites
+                        if i > 20:
+                            break
                         
                         # Heuristic: skip very small iframes (likely ads, trackers, or widgets)
                         # or iframes without a name/id unless they look like content
