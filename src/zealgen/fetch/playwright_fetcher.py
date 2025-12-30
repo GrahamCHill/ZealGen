@@ -10,272 +10,283 @@ class PlaywrightFetcher(Fetcher):
             
         try:
             async with async_playwright() as pw:
+                browser = None
                 try:
-                    browser = await pw.chromium.launch()
-                except Exception as e:
-                    if "playwright install" in str(e).lower():
-                        raise Exception("Playwright browsers not installed. Please run 'playwright install chromium'.")
-                    raise e
-                    
-                page = await browser.new_page()
-                
-                # Store WASM binaries found during navigation
-                wasm_binaries = {}
-
-                async def intercept_route(route):
                     try:
-                        response = await route.fetch()
-                        if ".wasm" in route.request.url.split('?')[0]:
-                            body = await response.body()
-                            # Store with absolute URL
-                            wasm_binaries[route.request.url] = body
-                            
-                            # If the server returned wrong MIME type, fix it for the browser
-                            headers = response.headers.copy()
-                            if "application/wasm" not in headers.get("content-type", "").lower():
-                                headers["content-type"] = "application/wasm"
-                                await route.fulfill(
-                                    response=response,
-                                    headers=headers,
-                                    body=body
-                                )
-                                return
-                        await route.continue_()
-                    except Exception:
+                        browser = await pw.chromium.launch()
+                    except Exception as e:
+                        if "playwright install" in str(e).lower():
+                            raise Exception("Playwright browsers not installed. Please run 'playwright install chromium'.")
+                        raise e
+                        
+                    page = await browser.new_page()
+                    
+                    # Store WASM binaries found during navigation
+                    wasm_binaries = {}
+
+                    async def intercept_route(route):
                         try:
-                            await route.continue_()
-                        except:
-                            pass
-
-                await page.route("**/*", intercept_route)
-
-                try:
-                    # Using a shorter timeout for navigation that might be a download
-                    await page.goto(url, wait_until="networkidle", timeout=30000)
-                except Exception as e:
-                    if "Download is starting" in str(e):
-                        await browser.close()
-                        return FetchResult(url, f"<html><body>Download started for {url}</body></html>")
-                    raise e
-                
-                # Wait for any JS to finish rendering content
-                await page.wait_for_timeout(5000)
-
-                # For SPA sites like Three.js, ensure the hash change actually loads content
-                # and if there are examples, wait for them to load.
-                if "#" in url:
-                    # Sometimes we need to force a re-navigation or wait longer for hash routes
-                    await page.wait_for_load_state("networkidle")
-                    await page.wait_for_timeout(2000)
-
-                # Try to expand any common "optional" sidebars or TOCs
-                await page.evaluate("""
-                    () => {
-                        const patterns = [
-                            /table of contents/i,
-                            /on this page/i,
-                            /menu/i,
-                            /expand/i,
-                            /sidebar/i
-                        ];
-                        const buttons = Array.from(document.querySelectorAll('button, a, .button, [role="button"]'));
-                        for (const btn of buttons) {
-                            const text = (btn.innerText || btn.title || btn.ariaLabel || "").trim();
-                            if (patterns.some(p => p.test(text))) {
-                                // Check if it's likely collapsed (common patterns)
-                                const isCollapsed = 
-                                    btn.getAttribute('aria-expanded') === 'false' || 
-                                    btn.classList.contains('collapsed') ||
-                                    btn.classList.contains('closed');
+                            response = await route.fetch()
+                            if ".wasm" in route.request.url.split('?')[0]:
+                                body = await response.body()
+                                # Store with absolute URL
+                                wasm_binaries[route.request.url] = body
                                 
-                                if (isCollapsed) {
-                                    try {
-                                        btn.click();
-                                        console.log("Clicked to expand: " + text);
-                                    } catch (e) {}
+                                # If the server returned wrong MIME type, fix it for the browser
+                                headers = response.headers.copy()
+                                if "application/wasm" not in headers.get("content-type", "").lower():
+                                    headers["content-type"] = "application/wasm"
+                                    await route.fulfill(
+                                        response=response,
+                                        headers=headers,
+                                        body=body
+                                    )
+                                    return
+                            await route.continue_()
+                        except Exception:
+                            try:
+                                await route.continue_()
+                            except:
+                                pass
+
+                    await page.route("**/*", intercept_route)
+
+                    try:
+                        # Using a shorter timeout for navigation that might be a download
+                        await page.goto(url, wait_until="networkidle", timeout=30000)
+                    except Exception as e:
+                        if "Download is starting" in str(e):
+                            return FetchResult(url, f"<html><body>Download started for {url}</body></html>")
+                        raise e
+                    
+                    # Wait for any JS to finish rendering content
+                    await page.wait_for_timeout(5000)
+
+                    # For SPA sites like Three.js, ensure the hash change actually loads content
+                    # and if there are examples, wait for them to load.
+                    if "#" in url:
+                        # Sometimes we need to force a re-navigation or wait longer for hash routes
+                        await page.wait_for_load_state("networkidle")
+                        await page.wait_for_timeout(2000)
+
+                    # Try to expand any common "optional" sidebars or TOCs
+                    await page.evaluate("""
+                        () => {
+                            const patterns = [
+                                /table of contents/i,
+                                /on this page/i,
+                                /menu/i,
+                                /expand/i,
+                                /sidebar/i
+                            ];
+                            const buttons = Array.from(document.querySelectorAll('button, a, .button, [role="button"]'));
+                            for (const btn of buttons) {
+                                const text = (btn.innerText || btn.title || btn.ariaLabel || "").trim();
+                                if (patterns.some(p => p.test(text))) {
+                                    // Check if it's likely collapsed (common patterns)
+                                    const isCollapsed = 
+                                        btn.getAttribute('aria-expanded') === 'false' || 
+                                        btn.classList.contains('collapsed') ||
+                                        btn.classList.contains('closed');
+                                    
+                                    if (isCollapsed) {
+                                        try {
+                                            btn.click();
+                                            console.log("Clicked to expand: " + text);
+                                        } catch (e) {}
+                                    }
                                 }
                             }
                         }
-                    }
-                """)
-                
-                # Wait a bit after potential expansion
-                await page.wait_for_timeout(1000)
-                
-                # Scroll from top to bottom to trigger lazy-loading content
-                await page.evaluate("""
-                    async () => {
-                        await new Promise((resolve) => {
-                            let totalHeight = 0;
-                            let distance = 100;
-                            let timer = setInterval(() => {
-                                let scrollHeight = document.body.scrollHeight;
-                                window.scrollBy(0, distance);
-                                totalHeight += distance;
-
-                                if(totalHeight >= scrollHeight){
-                                    clearInterval(timer);
-                                    resolve();
-                                }
-                            }, 100);
-                        });
-                        window.scrollTo(0, 0);
-                    }
-                """)
-
-                # Try to extract content from iframes and inject it into the main page.
-                # Many documentation sites use iframes for the main content (e.g. Three.js).
-                for frame in page.frames:
-                    if frame == page.main_frame:
-                        continue
+                    """)
                     
-                    # Heuristic: skip very small iframes (likely ads, trackers, or widgets)
-                    # or iframes without a name/id unless they look like content
-                    frame_name = frame.name.lower()
-                    if not frame_name and frame.frame_element:
-                        try:
-                            frame_name = (await frame.frame_element.get_attribute("id") or "").lower()
-                        except:
-                            pass
-
-                    # Common names for content iframes
-                    content_names = ["viewer", "content", "main", "frame", "article"]
-                    is_likely_content = any(name in frame_name for name in content_names)
+                    # Wait a bit after potential expansion
+                    await page.wait_for_timeout(1000)
                     
-                    if is_likely_content or not frame_name:
-                        try:
-                            # Wait for some content to be present in the iframe
-                            await frame.wait_for_load_state("networkidle", timeout=2000)
-                            iframe_content = await frame.content()
-                            
-                            # Inject iframe body into the main page so it's crawlable/indexable
-                            await page.evaluate("""
-                                (content, frameId) => {
-                                    const id = 'iframe-content-injected-' + frameId;
-                                    if (!document.getElementById(id)) {
-                                        const div = document.createElement('div');
-                                        div.id = id;
-                                        div.style.display = 'none';
-                                        div.innerHTML = content;
-                                        document.body.appendChild(div);
+                    # Scroll from top to bottom to trigger lazy-loading content
+                    await page.evaluate("""
+                        async () => {
+                            await new Promise((resolve) => {
+                                let totalHeight = 0;
+                                let distance = 100;
+                                let timer = setInterval(() => {
+                                    let scrollHeight = document.body.scrollHeight;
+                                    window.scrollBy(0, distance);
+                                    totalHeight += distance;
+
+                                    if(totalHeight >= scrollHeight){
+                                        clearInterval(timer);
+                                        resolve();
                                     }
-                                }
-                            """, iframe_content, frame_name or "unnamed")
-                        except:
-                            pass
+                                }, 100);
+                            });
+                            window.scrollTo(0, 0);
+                        }
+                    """)
 
-                # Wait for stability: check if the content size remains constant
-                last_html_len = 0
-                stable_count = 0
-                max_stability_checks = 15
-                for _ in range(max_stability_checks):
-                    html = await page.content()
-                    
-                    # Consider all frames for stability
+                    # Try to extract content from iframes and inject it into the main page.
+                    # Many documentation sites use iframes for the main content (e.g. Three.js).
                     for frame in page.frames:
                         if frame == page.main_frame:
                             continue
+                        
+                        # Heuristic: skip very small iframes (likely ads, trackers, or widgets)
+                        # or iframes without a name/id unless they look like content
+                        frame_name = frame.name.lower()
+                        if not frame_name and frame.frame_element:
+                            try:
+                                frame_name = (await frame.frame_element.get_attribute("id") or "").lower()
+                            except:
+                                pass
+
+                        # Common names for content iframes
+                        content_names = ["viewer", "content", "main", "frame", "article"]
+                        is_likely_content = any(name in frame_name for name in content_names)
+                        
+                        if is_likely_content or not frame_name:
+                            try:
+                                # Wait for some content to be present in the iframe
+                                await frame.wait_for_load_state("networkidle", timeout=2000)
+                                iframe_content = await frame.content()
+                                
+                                # Inject iframe body into the main page so it's crawlable/indexable
+                                await page.evaluate("""
+                                    (content, frameId) => {
+                                        const id = 'iframe-content-injected-' + frameId;
+                                        if (!document.getElementById(id)) {
+                                            const div = document.createElement('div');
+                                            div.id = id;
+                                            div.style.display = 'none';
+                                            div.innerHTML = content;
+                                            document.body.appendChild(div);
+                                        }
+                                    }
+                                """, iframe_content, frame_name or "unnamed")
+                            except:
+                                pass
+
+                    # Wait for stability: check if the content size remains constant
+                    last_html_len = 0
+                    stable_count = 0
+                    max_stability_checks = 15
+                    for _ in range(max_stability_checks):
+                        html = await page.content()
+                        
+                        # Consider all frames for stability
+                        for frame in page.frames:
+                            if frame == page.main_frame:
+                                continue
+                            try:
+                                f_html = await frame.content()
+                                html += f_html
+                            except:
+                                pass
+
+                        current_len = len(html)
+                        if current_len > 0 and current_len == last_html_len:
+                            stable_count += 1
+                        else:
+                            stable_count = 0
+                            last_html_len = current_len
+                        
+                        if stable_count >= 3:
+                            break
+                        await page.wait_for_timeout(1000)
+
+                    html = await page.content()
+
+                    # Embed collected WASM binaries into the HTML
+                    if wasm_binaries:
+                        import base64
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(html, "lxml")
+                        
+                        if not soup.body:
+                            # Fallback if no body
+                            body_tag = soup.new_tag("body")
+                            soup.append(body_tag)
+                        
+                        # Add a script for each WASM
+                        for wasm_url, wasm_body in wasm_binaries.items():
+                            wasm_b64 = base64.b64encode(wasm_body).decode('utf-8')
+                            wasm_script = soup.new_tag("script")
+                            wasm_script["type"] = "application/wasm-embedded"
+                            wasm_script["data-wasm-url"] = wasm_url
+                            wasm_script.string = wasm_b64
+                            soup.body.append(wasm_script)
+                        
+                        # Add the shim script
+                        shim_script = soup.new_tag("script")
+                        shim_script.string = """
+                        (function() {
+                            const originalFetch = window.fetch;
+                            window.fetch = async function(url, options) {
+                                const urlString = url.toString();
+                                const absoluteUrl = new URL(urlString, window.location.href).href;
+                                
+                                // Try exact match first, then try matching by filename
+                                let embedded = document.querySelector(`script[type="application/wasm-embedded"][data-wasm-url="${absoluteUrl}"]`);
+                                
+                                if (!embedded) {
+                                    const filename = urlString.split('/').pop().split('?')[0];
+                                    embedded = Array.from(document.querySelectorAll('script[type="application/wasm-embedded"]'))
+                                        .find(s => {
+                                            const storedUrl = s.getAttribute('data-wasm-url');
+                                            return storedUrl.split('/').pop().split('?')[0] === filename;
+                                        });
+                                }
+
+                                if (embedded) {
+                                    const binaryString = atob(embedded.textContent);
+                                    const bytes = new Uint8Array(binaryString.length);
+                                    for (let i = 0; i < binaryString.length; i++) {
+                                        bytes[i] = binaryString.charCodeAt(i);
+                                    }
+                                    return new Response(bytes, {
+                                        status: 200,
+                                        statusText: 'OK',
+                                        headers: { 'Content-Type': 'application/wasm' }
+                                    });
+                                }
+                                return originalFetch(url, options);
+                            };
+
+                            // Also shim instantiateStreaming
+                            const originalInstantiateStreaming = WebAssembly.instantiateStreaming;
+                            WebAssembly.instantiateStreaming = async function(source, importObject) {
+                                try {
+                                    return await originalInstantiateStreaming(source, importObject);
+                                } catch (e) {
+                                    if (source instanceof Promise || source instanceof Response) {
+                                        const response = (source instanceof Promise) ? await source : source;
+                                        const buffer = await response.arrayBuffer();
+                                        return WebAssembly.instantiate(buffer, importObject);
+                                    }
+                                    throw e;
+                                }
+                            };
+                        })();
+                        """
+                        # Insert shim at the beginning of head or body
+                        if soup.head:
+                            soup.head.insert(0, shim_script)
+                        else:
+                            soup.body.insert(0, shim_script)
+                        
+                        html = str(soup)
+
+                    return FetchResult(page.url, html)
+                finally:
+                    if browser:
+                        # Clean up routes and close browser in finally block
+                        # to ensure it happens even on error/timeout
                         try:
-                            f_html = await frame.content()
-                            html += f_html
+                            # We need to unroute ALL pages if we had multiple, 
+                            # but here we only have one.
+                            for p in browser.contexts[0].pages if browser.contexts else []:
+                                await p.unroute("**/*")
                         except:
                             pass
-
-                    current_len = len(html)
-                    if current_len > 0 and current_len == last_html_len:
-                        stable_count += 1
-                    else:
-                        stable_count = 0
-                        last_html_len = current_len
-                    
-                    if stable_count >= 3:
-                        break
-                    await page.wait_for_timeout(1000)
-
-                html = await page.content()
-
-                # Embed collected WASM binaries into the HTML
-                if wasm_binaries:
-                    import base64
-                    from bs4 import BeautifulSoup
-                    soup = BeautifulSoup(html, "lxml")
-                    
-                    if not soup.body:
-                        # Fallback if no body
-                        body_tag = soup.new_tag("body")
-                        soup.append(body_tag)
-                    
-                    # Add a script for each WASM
-                    for wasm_url, wasm_body in wasm_binaries.items():
-                        wasm_b64 = base64.b64encode(wasm_body).decode('utf-8')
-                        wasm_script = soup.new_tag("script")
-                        wasm_script["type"] = "application/wasm-embedded"
-                        wasm_script["data-wasm-url"] = wasm_url
-                        wasm_script.string = wasm_b64
-                        soup.body.append(wasm_script)
-                    
-                    # Add the shim script
-                    shim_script = soup.new_tag("script")
-                    shim_script.string = """
-                    (function() {
-                        const originalFetch = window.fetch;
-                        window.fetch = async function(url, options) {
-                            const urlString = url.toString();
-                            const absoluteUrl = new URL(urlString, window.location.href).href;
-                            
-                            // Try exact match first, then try matching by filename
-                            let embedded = document.querySelector(`script[type="application/wasm-embedded"][data-wasm-url="${absoluteUrl}"]`);
-                            
-                            if (!embedded) {
-                                const filename = urlString.split('/').pop().split('?')[0];
-                                embedded = Array.from(document.querySelectorAll('script[type="application/wasm-embedded"]'))
-                                    .find(s => {
-                                        const storedUrl = s.getAttribute('data-wasm-url');
-                                        return storedUrl.split('/').pop().split('?')[0] === filename;
-                                    });
-                            }
-
-                            if (embedded) {
-                                const binaryString = atob(embedded.textContent);
-                                const bytes = new Uint8Array(binaryString.length);
-                                for (let i = 0; i < binaryString.length; i++) {
-                                    bytes[i] = binaryString.charCodeAt(i);
-                                }
-                                return new Response(bytes, {
-                                    status: 200,
-                                    statusText: 'OK',
-                                    headers: { 'Content-Type': 'application/wasm' }
-                                });
-                            }
-                            return originalFetch(url, options);
-                        };
-
-                        // Also shim instantiateStreaming
-                        const originalInstantiateStreaming = WebAssembly.instantiateStreaming;
-                        WebAssembly.instantiateStreaming = async function(source, importObject) {
-                            try {
-                                return await originalInstantiateStreaming(source, importObject);
-                            } catch (e) {
-                                if (source instanceof Promise || source instanceof Response) {
-                                    const response = (source instanceof Promise) ? await source : source;
-                                    const buffer = await response.arrayBuffer();
-                                    return WebAssembly.instantiate(buffer, importObject);
-                                }
-                                throw e;
-                            }
-                        };
-                    })();
-                    """
-                    # Insert shim at the beginning of head or body
-                    if soup.head:
-                        soup.head.insert(0, shim_script)
-                    else:
-                        soup.body.insert(0, shim_script)
-                    
-                    html = str(soup)
-
-                final_url = page.url
-                await browser.close()
-                return FetchResult(final_url, html)
+                        await browser.close()
         except Exception as e:
             raise Exception(f"Playwright error: {e}")
