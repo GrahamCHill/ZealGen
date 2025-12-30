@@ -11,6 +11,7 @@ class PlaywrightFetcher(Fetcher):
         try:
             async with async_playwright() as pw:
                 browser = None
+                context = None
                 try:
                     try:
                         browser = await pw.chromium.launch()
@@ -18,17 +19,32 @@ class PlaywrightFetcher(Fetcher):
                         if "playwright install" in str(e).lower():
                             raise Exception("Playwright browsers not installed. Please run 'playwright install chromium'.")
                         raise e
-                        
-                    page = await browser.new_page()
+                    
+                    context = await browser.new_context()
+                    page = await context.new_page()
                     
                     # Store WASM binaries found during navigation
                     wasm_binaries = {}
 
                     async def intercept_route(route):
                         try:
-                            response = await route.fetch()
+                            try:
+                                response = await route.fetch()
+                            except Exception:
+                                # Page or context might have closed
+                                return
+
                             if ".wasm" in route.request.url.split('?')[0]:
-                                body = await response.body()
+                                try:
+                                    body = await response.body()
+                                except Exception:
+                                    # Response might be gone
+                                    try:
+                                        await route.continue_()
+                                    except:
+                                        pass
+                                    return
+
                                 # Store with absolute URL
                                 wasm_binaries[route.request.url] = body
                                 
@@ -36,18 +52,21 @@ class PlaywrightFetcher(Fetcher):
                                 headers = response.headers.copy()
                                 if "application/wasm" not in headers.get("content-type", "").lower():
                                     headers["content-type"] = "application/wasm"
-                                    await route.fulfill(
-                                        response=response,
-                                        headers=headers,
-                                        body=body
-                                    )
-                                    return
-                            await route.continue_()
-                        except Exception:
+                                    try:
+                                        await route.fulfill(
+                                            response=response,
+                                            headers=headers,
+                                            body=body
+                                        )
+                                        return
+                                    except Exception:
+                                        pass
                             try:
                                 await route.continue_()
-                            except:
+                            except Exception:
                                 pass
+                        except Exception:
+                            pass
 
                     await page.route("**/*", intercept_route)
 
@@ -277,16 +296,14 @@ class PlaywrightFetcher(Fetcher):
 
                     return FetchResult(page.url, html)
                 finally:
-                    if browser:
-                        # Clean up routes and close browser in finally block
-                        # to ensure it happens even on error/timeout
+                    if context:
                         try:
-                            # We need to unroute ALL pages if we had multiple, 
-                            # but here we only have one.
-                            for p in browser.contexts[0].pages if browser.contexts else []:
-                                await p.unroute("**/*")
+                            # Unroute all to stop any pending interceptors
+                            await page.unroute("**/*")
+                            await context.close()
                         except:
                             pass
+                    if browser:
                         await browser.close()
         except Exception as e:
             raise Exception(f"Playwright error: {e}")

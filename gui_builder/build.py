@@ -4,7 +4,7 @@ import os
 import shutil
 
 def build():
-    print("Building ZealGen GUI application...")
+    print("Building DocuGen GUI application...")
     
     # Entry point is src/zealgen/main.py
     # We want to bundle it as a single windowed application
