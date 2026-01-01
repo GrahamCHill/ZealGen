@@ -54,7 +54,7 @@ def is_url_within_doc(url, start_urls, related_patterns=None):
     
     return False
 
-async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_type="playwright", log_callback=None, verbose_callback=None):
+async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_type="playwright", log_callback=None, verbose_callback=None, stop_event=None):
     if max_pages is None:
         max_pages = DEFAULT_MAX_PAGES
     def log(message):
@@ -95,6 +95,10 @@ async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_t
     external_pages_count = 0
 
     while queue:
+        if stop_event and stop_event.is_set():
+            v_log("Stop requested, finishing scan early...")
+            break
+
         url, is_internal = queue.pop(0)
         norm_url = normalize_url(url)
         if norm_url in visited:
@@ -191,7 +195,7 @@ async def scan(urls, js=False, max_pages=None, progress_callback=None, fetcher_t
 
     return sorted(list(discovered))
 
-async def generate(urls, output, js=False, max_pages=None, progress_callback=None, allowed_urls=None, fetcher_type="playwright", log_callback=None, verbose_callback=None):
+async def generate(urls, output, js=False, max_pages=None, progress_callback=None, allowed_urls=None, fetcher_type="playwright", log_callback=None, verbose_callback=None, stop_event=None):
     if max_pages is None:
         max_pages = DEFAULT_MAX_PAGES
     def log(message):
@@ -244,6 +248,10 @@ async def generate(urls, output, js=False, max_pages=None, progress_callback=Non
         allowed_urls.update({normalize_url(u) for u in urls})
 
     while queue:
+        if stop_event and stop_event.is_set():
+            v_log("Stop requested, finalizing docset early...")
+            break
+
         url, is_internal = queue.pop(0)
         norm_url = normalize_url(url)
         if norm_url in visited:
@@ -330,7 +338,12 @@ async def generate(urls, output, js=False, max_pages=None, progress_callback=Non
             is_allowed = bool(allowed_urls and norm_clean_url in allowed_urls)
             is_next_internal = is_url_within_doc(clean_url, urls)
             
-            should_localize = is_allowed or is_next_internal or (is_internal and not allowed_urls and external_pages_count < max_pages)
+            # If we have an allowed_urls list (from GUI), only follow links in that list
+            # regardless of whether they are internal or not.
+            if allowed_urls:
+                should_localize = is_allowed
+            else:
+                should_localize = is_next_internal or (is_internal and external_pages_count < max_pages)
 
             next_url_is_same_page = False
             
@@ -350,8 +363,10 @@ async def generate(urls, output, js=False, max_pages=None, progress_callback=Non
                     already_in_queue = any(normalize_url(q_url) == norm_clean_url for q_url, _ in queue)
                     if not already_in_queue:
                         if is_next_internal:
-                            v_log(f"Added internal link to queue: {clean_url}")
-                            queue.append((clean_url, True))
+                            # Even if internal, if we have allowed_urls, we only follow if it's in there
+                            if not allowed_urls or is_allowed:
+                                v_log(f"Added internal link to queue: {clean_url}")
+                                queue.append((clean_url, True))
                         elif is_internal:
                              # Only follow external links if found on an internal page
                              if is_allowed or (not allowed_urls and external_pages_count < max_pages):

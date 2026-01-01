@@ -4,6 +4,7 @@ import os
 import platform
 import subprocess
 import plistlib
+import threading
 from urllib.parse import urlparse
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -28,13 +29,14 @@ class ScanWorker(QThread):
         self.urls = urls
         self.js = js
         self.fetcher_type = fetcher_type
+        self.stop_event = threading.Event()
 
     def run(self):
         try:
             def report_progress(current, total):
                 self.progress.emit(current, total)
 
-            discovered = anyio.run(scan, self.urls, self.js, DEFAULT_MAX_PAGES, report_progress, self.fetcher_type, self.log.emit, self.verbose_log.emit)
+            discovered = anyio.run(scan, self.urls, self.js, DEFAULT_MAX_PAGES, report_progress, self.fetcher_type, self.log.emit, self.verbose_log.emit, self.stop_event)
             self.finished.emit(discovered)
         except Exception as e:
             self.error.emit(str(e))
@@ -52,11 +54,14 @@ class MultiWorker(QThread):
         self.output_base = output_base
         self.js = js
         self.fetcher_type = fetcher_type
+        self.stop_event = threading.Event()
 
     def run(self):
         try:
             total_docsets = len(self.docsets_to_generate)
             for i, (name, urls, allowed_urls) in enumerate(self.docsets_to_generate):
+                if self.stop_event.is_set():
+                    break
                 self.log.emit(f"Generating docset: {name} ({i+1}/{total_docsets})")
                 
                 docset_filename = name if name.endswith(".docset") else f"{name}.docset"
@@ -65,7 +70,7 @@ class MultiWorker(QThread):
                 def report_progress(current, total):
                     self.progress.emit(current, total)
 
-                anyio.run(generate, urls, output_path, self.js, DEFAULT_MAX_PAGES, report_progress, allowed_urls, self.fetcher_type, self.log.emit, self.verbose_log.emit)
+                anyio.run(generate, urls, output_path, self.js, DEFAULT_MAX_PAGES, report_progress, allowed_urls, self.fetcher_type, self.log.emit, self.verbose_log.emit, self.stop_event)
             
             self.finished.emit()
         except Exception as e:
@@ -451,10 +456,25 @@ class MainWindow(QMainWindow):
         self.generate_btn.clicked.connect(self.start_generation)
         layout.addWidget(self.generate_btn)
 
+        # Stop button (Close out and build)
+        self.stop_btn = QPushButton("Finish Scan and Build")
+        self.stop_btn.clicked.connect(self.finish_early)
+        self.stop_btn.setVisible(False)
+        layout.addWidget(self.stop_btn)
+
         # Open Zeal Folder button
         self.open_zeal_btn = QPushButton("Open Zeal Docsets Folder")
         self.open_zeal_btn.clicked.connect(self.open_zeal_folder)
         layout.addWidget(self.open_zeal_btn)
+
+    def finish_early(self):
+        if hasattr(self, 'scan_worker') and self.scan_worker.isRunning():
+            self.log_output.append("Finishing scan early as requested...")
+            self.scan_worker.stop_event.set()
+        elif hasattr(self, 'worker') and self.worker.isRunning():
+            self.log_output.append("Finishing generation early as requested...")
+            self.worker.stop_event.set()
+        self.stop_btn.setEnabled(False)
 
     def open_zeal_folder(self):
         system = platform.system()
@@ -522,12 +542,15 @@ class MainWindow(QMainWindow):
             return
 
         self.generate_btn.setEnabled(False)
+        self.stop_btn.setVisible(True)
+        self.stop_btn.setEnabled(True)
         self.process_next_docset()
 
     def process_next_docset(self):
         if not self.docsets_queue:
             # All docsets processed message is now handled in on_generation_finished
             self.generate_btn.setEnabled(True)
+            self.stop_btn.setVisible(False)
             self.progress_bar.setVisible(False)
             return
 
@@ -535,6 +558,7 @@ class MainWindow(QMainWindow):
         self.log_output.append(f"Scanning for {self.current_docset['name']} ({self.current_docset['url']})...")
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
+        self.stop_btn.setEnabled(True)
         
         self.scan_worker = ScanWorker([self.current_docset['url']], self.js, self.engine)
         self.scan_worker.finished.connect(self.on_scan_finished)
@@ -546,6 +570,7 @@ class MainWindow(QMainWindow):
 
     def on_scan_finished(self, discovered_urls):
         self.progress_bar.setVisible(False)
+        self.stop_btn.setEnabled(False)
         
         selected_urls = []
         root_urls = []
@@ -586,6 +611,7 @@ class MainWindow(QMainWindow):
         self.log_output.append(f"Starting generation for {name}...")
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
+        self.stop_btn.setEnabled(True)
 
         # We use MultiWorker even for a single docset to keep it simple
         self.worker = MultiWorker([(name, urls, selected_urls)], self.output_base, self.js, self.engine)
@@ -598,8 +624,10 @@ class MainWindow(QMainWindow):
 
     def on_generation_finished(self):
         self.log_output.append(f"Finished generating {self.current_docset['name']}.")
+        self.stop_btn.setEnabled(False)
         if not self.docsets_queue:
             self.log_output.append('<br><font color="green"><b>Done: Docset(s) generated successfully.</b></font>')
+            self.stop_btn.setVisible(False)
         self.process_next_docset()
 
     def update_progress(self, current, total):
@@ -608,6 +636,7 @@ class MainWindow(QMainWindow):
 
     def on_error(self, message):
         self.generate_btn.setEnabled(True)
+        self.stop_btn.setVisible(False)
         self.log_output.append(f'<br><font color="red"><b>Error: {message}</b></font>')
 
 def main():
