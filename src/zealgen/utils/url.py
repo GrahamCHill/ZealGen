@@ -36,7 +36,7 @@ def normalize_url(url: str) -> str:
         # (contains no spaces or dots), it might be a route.
         # This is a heuristic and might need refinement.
         use_fragment = True
-
+    
     query = parsed.query
     res = f"{netloc}{path}"
     if query:

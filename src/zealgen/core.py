@@ -1,3 +1,4 @@
+import re
 import anyio
 import pathlib
 import os
@@ -342,7 +343,17 @@ async def generate(urls, output, js=False, max_pages=None, progress_callback=Non
                 v_log(f"External/disallowed link, keeping absolute: {next_url}")
                 element[attr] = next_url
         
-        updated_html = await rewrite_assets(str(soup), url, doc_dir)
+        updated_html = await rewrite_assets(str(updated_soup), url, doc_dir)
+        
+        # General JS path fix: remove directory prefixes prepended by JS in SPAs
+        # This handles patterns like 'pages/' + htmlFile or "docs/" + path
+        # It's necessary because we flatten the directory structure.
+        path_prefix_patterns = [
+            (r"(['\"])([a-zA-Z0-9_\-]+/)\1\s*\+", r"'' +"), # 'dir/' +
+            (r"(['\"])(\.\./[a-zA-Z0-9_\-]+/)\1\s*\+", r"'' +"), # '../dir/' +
+        ]
+        for pattern, replacement in path_prefix_patterns:
+            updated_html = re.sub(pattern, replacement, updated_html)
         
         # Determine norm_url for comparison with main_url
         norm_url = normalize_url(url)
@@ -354,7 +365,20 @@ async def generate(urls, output, js=False, max_pages=None, progress_callback=Non
         
         pages_count += 1
         
-        # Ensure DOCTYPE exists
+        # Ensure DOCTYPE and charset exist
+        updated_soup = BeautifulSoup(updated_html, "lxml")
+        if not updated_soup.find("meta", charset=True):
+            if not updated_soup.head:
+                head_tag = updated_soup.new_tag("head")
+                if updated_soup.html:
+                    updated_soup.html.insert(0, head_tag)
+                else:
+                    updated_soup.insert(0, head_tag)
+            
+            charset_tag = updated_soup.new_tag("meta", charset="utf-8")
+            updated_soup.head.insert(0, charset_tag)
+        
+        updated_html = str(updated_soup)
         if not updated_html.lstrip().lower().startswith("<!doctype"):
             updated_html = "<!DOCTYPE html>\n" + updated_html
 
