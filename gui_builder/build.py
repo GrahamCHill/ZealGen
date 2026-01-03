@@ -27,6 +27,7 @@ def build():
         icon_path = os.path.join(script_dir, ICON_WIN)
     elif sys.platform == "darwin":
         icon_path = os.path.join(script_dir, ICON_MAC)
+    # linux: no icon flag (handled by desktop env / package)
 
     cmd = [
         sys.executable,
