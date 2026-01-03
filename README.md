@@ -56,7 +56,7 @@ DocuGen is a powerful, Python-based tool designed to generate [Zeal](https://zea
 To launch the graphical interface, simply run the main entry point without arguments:
 
 ```bash
-zealgen
+docugen
 ```
 
 1. **Enter URLs**: Provide one or more base documentation URLs.
@@ -70,7 +70,7 @@ zealgen
 For automation, you can use the command-line interface:
 
 ```bash
-zealgen https://docs.python.org/3/ --out Python.docset --js --max-pages 500
+docugen https://docs.python.org/3/ --out Python.docset --js --max-pages 500
 ```
 
 #### CLI Options:
@@ -83,12 +83,12 @@ zealgen https://docs.python.org/3/ --out Python.docset --js --max-pages 500
 
 ### Project Structure
 
-- `src/zealgen/core.py`: The main orchestration logic for scanning and generation.
-- `src/zealgen/app.py`: PySide6 implementation of the GUI.
-- `src/zealgen/fetch/`: Modular fetcher system (HTTPX, Playwright, QtWebEngine).
-- `src/zealgen/parsers/`: Logic for identifying symbols and structure in different doc formats.
-- `src/zealgen/assets/`: Asset discovery and rewriting engine.
-- `src/zealgen/docset/`: Builder for the `.docset` folder structure and SQLite index.
+- `src/docugen/core.py`: The main orchestration logic for scanning and generation.
+- `src/docugen/app.py`: PySide6 implementation of the GUI.
+- `src/docugen/fetch/`: Modular fetcher system (HTTPX, Playwright, QtWebEngine).
+- `src/docugen/parsers/`: Logic for identifying symbols and structure in different doc formats.
+- `src/docugen/assets/`: Asset discovery and rewriting engine.
+- `src/docugen/docset/`: Builder for the `.docset` folder structure and SQLite index.
 
 ### Development and Testing
 

@@ -22,10 +22,10 @@ test = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/zealgen"]
+packages = ["src/docugen"]
 
 [project.scripts]
-zealgen = "zealgen.main:main"
+docugen = "docugen.main:main"
 
 [build-system]
 requires = ["hatchling"]

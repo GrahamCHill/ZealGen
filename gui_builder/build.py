@@ -6,10 +6,10 @@ import shutil
 def build():
     print("Building DocuGen GUI application...")
     
-    # Entry point is src/zealgen/main.py
+    # Entry point is src/docugen/main.py
     # We want to bundle it as a single windowed application
     
-    entry_point = os.path.join("src", "zealgen", "main.py")
+    entry_point = os.path.join("src", "docugen", "main.py")
     
     if not os.path.exists(entry_point):
         print(f"Error: Could not find entry point at {entry_point}")
@@ -27,8 +27,8 @@ def build():
         "--noconfirm",
         "--onefile",
         "--windowed",
-        "--name", "ZealGen",
-        "--add-data", f"src/zealgen{os.pathsep}zealgen",
+        "--name", "DocuGen",
+        "--add-data", f"src/docugen{os.pathsep}docugen",
         entry_point
     ]
 

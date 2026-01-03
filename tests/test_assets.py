@@ -3,7 +3,7 @@ import pathlib
 import tempfile
 import shutil
 import anyio
-from zealgen.assets.rewrite import rewrite_assets
+from docugen.assets.rewrite import rewrite_assets
 
 class TestAssetRewrite(unittest.TestCase):
     def setUp(self):

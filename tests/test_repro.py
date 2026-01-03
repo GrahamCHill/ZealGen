@@ -5,8 +5,8 @@ import os
 # Add src to sys.path
 sys.path.append(os.path.join(os.getcwd(), "../src"))
 
-from zealgen.core import scan, generate
-from zealgen.fetch.playwright_fetcher import PlaywrightFetcher
+from docugen.core import scan, generate
+from docugen.fetch.playwright_fetcher import PlaywrightFetcher
 
 async def test_threejs():
     print("Testing Three.js...")

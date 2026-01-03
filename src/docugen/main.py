@@ -1,6 +1,6 @@
 import sys
-from zealgen.cli import main as cli_main
-from zealgen.app import main as gui_main
+from docugen.cli import main as cli_main
+from docugen.app import main as gui_main
 
 def main():
     if len(sys.argv) > 1:

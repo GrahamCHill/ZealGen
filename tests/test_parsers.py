@@ -1,5 +1,5 @@
 import unittest
-from zealgen.parsers.generic import GenericParser
+from docugen.parsers.generic import GenericParser
 
 class TestGenericParser(unittest.TestCase):
     def setUp(self):

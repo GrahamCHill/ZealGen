@@ -1,14 +1,14 @@
 # Architecture
 
-ZealGen is organized into several modules:
+DocuGen is organized into several modules:
 
-- `zealgen.app`: The PySide6-based GUI application.
-- `zealgen.cli`: The command-line interface.
-- `zealgen.core`: Core logic for scanning and generating docsets.
-- `zealgen.fetch`: Fetchers for retrieving web content (HTTPX, Playwright, Qt).
-- `zealgen.parsers`: Parsers for extracting content and symbols from different doc formats.
-- `zealgen.docset`: Tools for building the final `.docset` structure, including the SQLite index and `Info.plist`.
-- `zealgen.assets`: Logic for rewriting asset URLs to local paths.
+- `docugen.app`: The PySide6-based GUI application.
+- `docugen.cli`: The command-line interface.
+- `docugen.core`: Core logic for scanning and generating docsets.
+- `docugen.fetch`: Fetchers for retrieving web content (HTTPX, Playwright, Qt).
+- `docugen.parsers`: Parsers for extracting content and symbols from different doc formats.
+- `docugen.docset`: Tools for building the final `.docset` structure, including the SQLite index and `Info.plist`.
+- `docugen.assets`: Logic for rewriting asset URLs to local paths.
 
 ## Generation Flow
 

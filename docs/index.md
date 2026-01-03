@@ -1,6 +1,6 @@
-# ZealGen Documentation
+# DocuGen Documentation
 
-ZealGen is a tool to generate Zeal/Dash docsets from online documentation. It supports various documentation formats and can handle JavaScript-heavy sites using Playwright or Qt.
+DocuGen is a tool to generate Zeal/Dash docsets from online documentation. It supports various documentation formats and can handle JavaScript-heavy sites using Playwright or Qt.
 
 ## Features
 - Fetches documentation from URLs.

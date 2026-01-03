@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['../src/zealgen/main.py'],
+    ['../src/docugen/main.py'],
     pathex=[],
     binaries=[],
-    datas=[('src/zealgen', 'zealgen')],
+    datas=[('src/docugen', 'docugen')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='ZealGen',
+    name='DocuGen',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -38,7 +38,7 @@ exe = EXE(
 )
 app = BUNDLE(
     exe,
-    name='ZealGen.app',
+    name='DocuGen.app',
     icon=None,
     bundle_identifier=None,
 )

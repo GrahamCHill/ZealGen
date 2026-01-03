@@ -1,5 +1,5 @@
 import unittest
-from zealgen.utils.url import normalize_url, get_filename_from_url, clean_domain
+from docugen.utils.url import normalize_url, get_filename_from_url, clean_domain
 
 class TestUrlUtils(unittest.TestCase):
     def test_clean_domain(self):

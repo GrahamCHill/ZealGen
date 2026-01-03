@@ -60,7 +60,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="zealgen",
+    name="docugen",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -74,12 +74,12 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="zealgen",
+    name="docugen",
 )
 
 app = BUNDLE(
     coll,
-    name="ZealGen.app",
+    name="DocuGen.app",
     icon = None, # set .icns later if you want
-    bundle_identifier="dev.grahamhill.zealgen",
+    bundle_identifier="dev.grahamhill.docugen",
 )

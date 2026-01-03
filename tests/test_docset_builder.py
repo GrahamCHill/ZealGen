@@ -3,8 +3,8 @@ import os
 import shutil
 import tempfile
 import sqlite3
-from zealgen.docset.builder import DocsetBuilder
-from zealgen.parsers.base import ParsedPage
+from docugen.docset.builder import DocsetBuilder
+from docugen.parsers.base import ParsedPage
 
 class TestDocsetBuilder(unittest.TestCase):
     def setUp(self):
