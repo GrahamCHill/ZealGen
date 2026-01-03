@@ -35,10 +35,11 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['/Users/grahamhill/Projects/Code/docsetGenerator/gui_builder/assets/icon.icns'],
 )
 app = BUNDLE(
     exe,
     name='DocuGen.app',
-    icon=None,
-    bundle_identifier=None,
+    icon='/Users/grahamhill/Projects/Code/docsetGenerator/gui_builder/assets/icon.icns',
+    bundle_identifier='com.yourdomain.docugen',
 )
